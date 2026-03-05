@@ -30,6 +30,20 @@
             </intent-filter>
         </activity>
 
+        <!-- Device Admin Receiver for Device Owner mode -->
+        <receiver
+            android:name="com.enterprise.devicemanager.admin.DeviceManagerReceiver"
+            android:exported="true"
+            android:permission="android.permission.BIND_DEVICE_ADMIN">
+            <meta-data
+                android:name="android.app.device_admin"
+                android:resource="@xml/device_admin_receiver" />
+            <intent-filter>
+                <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
+                <action android:name="android.app.action.PROFILE_PROVISIONING_COMPLETE" />
+            </intent-filter>
+        </receiver>
+
     </application>
 
 </manifest>
