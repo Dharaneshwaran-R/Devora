@@ -8,6 +8,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -26,5 +27,17 @@ public class EnrollmentController {
                         "deviceId", device.getDeviceId(),
                         "status", device.getStatus()
                 ));
+    }
+
+    @GetMapping("/devices")
+    public ResponseEntity<List<Device>> getAllDevices() {
+        return ResponseEntity.ok(enrollmentService.getAllDevices());
+    }
+
+    @GetMapping("/devices/{deviceId}")
+    public ResponseEntity<Device> getDevice(@PathVariable String deviceId) {
+        return enrollmentService.getDevice(deviceId)
+                .map(ResponseEntity::ok)
+                .orElse(ResponseEntity.notFound().build());
     }
 }

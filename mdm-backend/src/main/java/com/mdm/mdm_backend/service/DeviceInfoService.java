@@ -7,6 +7,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Service
 @RequiredArgsConstructor
@@ -30,5 +31,9 @@ public class DeviceInfoService {
 
         log.info("Saving device info for: {}", request.getDeviceId());
         return deviceInfoRepository.save(info);
+    }
+
+    public List<DeviceInfo> getDeviceInfo(String deviceId) {
+        return deviceInfoRepository.findByDeviceIdOrderByCollectedAtDesc(deviceId);
     }
 }

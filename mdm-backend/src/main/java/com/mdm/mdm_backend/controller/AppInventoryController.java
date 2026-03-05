@@ -27,4 +27,13 @@ public class AppInventoryController {
                         "appsCount", saved.size()
                 ));
     }
+
+    @GetMapping("/app-inventory/{deviceId}")
+    public ResponseEntity<List<AppInventory>> getInventory(@PathVariable String deviceId) {
+        List<AppInventory> apps = appInventoryService.getInventory(deviceId);
+        if (apps.isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.ok(apps);
+    }
 }

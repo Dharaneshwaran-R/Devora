@@ -7,6 +7,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Optional;
 
 @Service
 @RequiredArgsConstructor
@@ -33,5 +35,21 @@ public class EnrollmentService {
 
         log.info("Enrolling new device: {}", request.getDeviceId());
         return deviceRepository.save(device);
+    }
+
+    public List<Device> getAllDevices() {
+        return deviceRepository.findAll();
+    }
+
+    public Optional<Device> getDevice(String deviceId) {
+        return deviceRepository.findByDeviceId(deviceId);
+    }
+
+    public long countDevices() {
+        return deviceRepository.count();
+    }
+
+    public long countByStatus(String status) {
+        return deviceRepository.countByStatus(status);
     }
 }

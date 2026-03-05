@@ -39,4 +39,12 @@ public class AppInventoryService {
         log.info("Saving {} apps for device: {}", apps.size(), request.getDeviceId());
         return appInventoryRepository.saveAll(apps);
     }
+
+    public List<AppInventory> getInventory(String deviceId) {
+        return appInventoryRepository.findByDeviceId(deviceId);
+    }
+
+    public long countApps() {
+        return appInventoryRepository.count();
+    }
 }
