@@ -166,7 +166,7 @@ fun AppNavigation(
                 onSignOut = {
                     authViewModel.signOut()
                     navController.navigate("login") {
-                        popUpTo(navController.graph.id) { inclusive = false }
+                        popUpTo("splash") { inclusive = true }
                         launchSingleTop = true
                     }
                 },
@@ -198,7 +198,7 @@ fun AppNavigation(
                 onSignOut = {
                     authViewModel.signOut()
                     navController.navigate("login") {
-                        popUpTo(navController.graph.id) { inclusive = false }
+                        popUpTo("splash") { inclusive = true }
                         launchSingleTop = true
                     }
                 },
