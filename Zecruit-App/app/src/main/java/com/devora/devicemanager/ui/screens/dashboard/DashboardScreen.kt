@@ -31,6 +31,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
@@ -113,7 +114,7 @@ fun DashboardScreen(
 ) {
     val bgColor = if (isDark) DarkBgBase else BgBase
     val textColor = if (isDark) DarkTextPrimary else TextPrimary
-    val currentDate = remember@Composable {
+    val currentDate = remember {
         SimpleDateFormat("EEEE, MMMM d, yyyy", Locale.getDefault()).format(Date())
     }
 
