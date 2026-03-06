@@ -5,9 +5,6 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -16,6 +13,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.devora.devicemanager.ui.screens.dashboard.DashboardScreen
+import com.devora.devicemanager.ui.screens.devices.DeviceDetailScreen
 import com.devora.devicemanager.ui.screens.devices.DeviceListScreen
 import com.devora.devicemanager.ui.screens.employee.EmployeeRegisterScreen
 import com.devora.devicemanager.ui.screens.employeedashboard.EmployeeDashboardScreen
@@ -145,9 +143,7 @@ fun AppNavigation(
         // Device Detail
         composable("device_detail/{deviceId}") { backStackEntry ->
             val deviceId = backStackEntry.arguments?.getString("deviceId") ?: ""
-            // DeviceDetailScreen placeholder — will be created in File 4
-            // For now, navigate back
-            DeviceDetailPlaceholder(
+            DeviceDetailScreen(
                 deviceId = deviceId,
                 onBack = { navController.popBackStack() },
                 isDark = isDark
@@ -213,19 +209,4 @@ fun AppNavigation(
     }
 }
 
-// ══════════════════════════════════════
-// PLACEHOLDER — removed when DeviceDetailScreen is created
-// ══════════════════════════════════════
-@Composable
-private fun DeviceDetailPlaceholder(
-    deviceId: String,
-    onBack: () -> Unit,
-    isDark: Boolean
-) {
-    Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center
-    ) {
-        Text("Device: $deviceId\n(Detail screen coming soon)")
-    }
-}
+
