@@ -28,11 +28,16 @@ import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.automirrored.outlined.Logout
+import androidx.compose.material.icons.outlined.DevicesOther
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.Notifications
+import androidx.compose.material.icons.outlined.NotificationsActive
+import androidx.compose.material.icons.outlined.Security
+import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material3.ripple
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Divider
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
@@ -115,6 +120,12 @@ fun SettingsScreen(
     var syncInterval by remember { mutableStateOf("30m") }
     var showSignOutDialog by remember { mutableStateOf(false) }
     var connectionStatus by remember { mutableStateOf<String?>(null) }
+
+    // Notification preferences
+    var notifySecurityViolations by remember { mutableStateOf(true) }
+    var notifyNewEnrollments by remember { mutableStateOf(true) }
+    var notifySyncCompleted by remember { mutableStateOf(false) }
+    var notifyDeviceOffline by remember { mutableStateOf(true) }
 
     val bgColor = if (isDark) DarkBgBase else BgBase
     val textColor = if (isDark) DarkTextPrimary else TextPrimary
@@ -322,7 +333,7 @@ fun SettingsScreen(
                                 )
                             }
                             if (index < policies.size - 1) {
-                                Divider(thickness = 1.dp, color = dividerColor)
+                                HorizontalDivider(thickness = 1.dp, color = dividerColor)
                             }
                         }
                     }
@@ -457,7 +468,7 @@ fun SettingsScreen(
                             )
                         }
 
-                        Divider(
+                        HorizontalDivider(
                             modifier = Modifier.padding(vertical = 12.dp),
                             thickness = 1.dp,
                             color = dividerColor
@@ -482,7 +493,7 @@ fun SettingsScreen(
                             )
                         }
 
-                        Divider(
+                        HorizontalDivider(
                             thickness = 1.dp,
                             color = dividerColor
                         )
@@ -508,7 +519,7 @@ fun SettingsScreen(
                             )
                         }
 
-                        Divider(
+                        HorizontalDivider(
                             modifier = Modifier.padding(vertical = 12.dp),
                             thickness = 1.dp,
                             color = dividerColor
@@ -521,6 +532,93 @@ fun SettingsScreen(
                             modifier = Modifier.fillMaxWidth(),
                             isDark = isDark
                         )
+                    }
+                }
+            }
+
+            // ── NOTIFICATIONS ──
+            item {
+                SectionHeader(title = "▸ NOTIFICATIONS", isDark = isDark)
+            }
+            item {
+                DevoraCard(isDark = isDark) {
+                    Column {
+                        data class NotifPref(
+                            val icon: ImageVector,
+                            val title: String,
+                            val subtitle: String,
+                            val checked: Boolean,
+                            val onToggle: (Boolean) -> Unit
+                        )
+
+                        val notifPrefs = listOf(
+                            NotifPref(
+                                Icons.Outlined.Security,
+                                "Security Violations",
+                                "Alert on policy breaches & threats",
+                                notifySecurityViolations
+                            ) { notifySecurityViolations = it },
+                            NotifPref(
+                                Icons.Outlined.DevicesOther,
+                                "New Enrollments",
+                                "When a device completes enrollment",
+                                notifyNewEnrollments
+                            ) { notifyNewEnrollments = it },
+                            NotifPref(
+                                Icons.Outlined.Sync,
+                                "Sync Completed",
+                                "After each device sync cycle",
+                                notifySyncCompleted
+                            ) { notifySyncCompleted = it },
+                            NotifPref(
+                                Icons.Outlined.Notifications,
+                                "Device Offline",
+                                "When a managed device goes offline",
+                                notifyDeviceOffline
+                            ) { notifyDeviceOffline = it }
+                        )
+
+                        notifPrefs.forEachIndexed { index, pref ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 12.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = pref.icon,
+                                    contentDescription = null,
+                                    tint = PurpleCore,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = pref.title,
+                                        fontFamily = PlusJakartaSans,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 14.sp,
+                                        color = textColor
+                                    )
+                                    Text(
+                                        text = pref.subtitle,
+                                        fontFamily = DMSans,
+                                        fontWeight = FontWeight.Normal,
+                                        fontSize = 12.sp,
+                                        color = TextMuted
+                                    )
+                                }
+                                Switch(
+                                    checked = pref.checked,
+                                    onCheckedChange = pref.onToggle,
+                                    colors = switchColors
+                                )
+                            }
+                            if (index < notifPrefs.size - 1) {
+                                HorizontalDivider(thickness = 1.dp, color = dividerColor)
+                            }
+                        }
                     }
                 }
             }
