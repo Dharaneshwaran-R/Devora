@@ -100,7 +100,16 @@ fun DeviceDetailScreen(
     onBack: () -> Unit,
     isDark: Boolean
 ) {
-    val device = mockDevices.find { it.name == deviceId } ?: mockDevices.first()
+    // FIXED: Removed mockDevices lookup and replaced with placeholder Device object
+    val device = Device(
+        name = deviceId.ifEmpty { "Unknown Device" },
+        manufacturer = "Unknown",
+        model = "Unknown",
+        status = "Enrolled",
+        api = "API 35",
+        initial = deviceId.take(1).uppercase().ifEmpty { "?" }
+    )
+
     var selectedTab by remember { mutableIntStateOf(0) }
     val tabs = listOf("INFO", "APPS", "ACTIVITY", "ACTIONS")
     val snackbarHostState = remember { SnackbarHostState() }

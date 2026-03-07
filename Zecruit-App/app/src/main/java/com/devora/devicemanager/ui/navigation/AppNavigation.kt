@@ -1,5 +1,6 @@
 package com.devora.devicemanager.ui.navigation
 
+import android.content.Intent
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -8,10 +9,12 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.devora.devicemanager.MainActivity
 import com.devora.devicemanager.ui.screens.dashboard.DashboardScreen
 import com.devora.devicemanager.ui.screens.devices.DeviceDetailScreen
 import com.devora.devicemanager.ui.screens.devices.DeviceListScreen
@@ -160,15 +163,16 @@ fun AppNavigation(
 
         // Settings
         composable("settings") {
+            val context = LocalContext.current
             SettingsScreen(
                 isDark = isDark,
                 onThemeToggle = onThemeToggle,
                 onSignOut = {
                     authViewModel.signOut()
-                        navController.popBackStack("dashboard", inclusive = true)
-                        navController.navigate("login") {
-                            launchSingleTop = true
-                        }
+                    // Restart activity to go back to login
+                    val intent = Intent(context, MainActivity::class.java)
+                    intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+                    context.startActivity(intent)
                 },
                 onNavigate = navigateTo
             )
