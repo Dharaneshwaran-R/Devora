@@ -54,8 +54,17 @@ data class AppInventoryRequest(
 data class DashboardStats(
     @SerializedName("totalDevices") val totalDevices: Int,
     @SerializedName("activeDevices") val activeDevices: Int,
-    @SerializedName("violations") val violations: Int,
+    @SerializedName(value = "violations", alternate = ["inactiveDevices"]) val violations: Int,
     @SerializedName("totalApps") val totalApps: Int
+)
+
+data class DeviceResponse(
+    @SerializedName("id") val id: Long,
+    @SerializedName("deviceId") val deviceId: String,
+    @SerializedName("enrollmentToken") val enrollmentToken: String?,
+    @SerializedName("enrollmentMethod") val enrollmentMethod: String,
+    @SerializedName("enrolledAt") val enrolledAt: String,
+    @SerializedName("status") val status: String
 )
 
 data class TokenValidationRequest(
@@ -65,6 +74,28 @@ data class TokenValidationRequest(
 
 data class TokenValidationResponse(
     @SerializedName("valid") val valid: Boolean,
+    @SerializedName("message") val message: String?
+)
+
+data class AdminRegisterRequest(
+    @SerializedName("name") val name: String,
+    @SerializedName("email") val email: String,
+    @SerializedName("password") val password: String
+)
+
+data class AdminLoginRequest(
+    @SerializedName("email") val email: String,
+    @SerializedName("password") val password: String
+)
+
+data class AdminLoginResponse(
+    @SerializedName("success") val success: Boolean,
+    @SerializedName("name") val name: String?,
+    @SerializedName("message") val message: String?
+)
+
+data class AdminRegisterResponse(
+    @SerializedName("success") val success: Boolean,
     @SerializedName("message") val message: String?
 )
 
@@ -83,6 +114,9 @@ interface EnrollmentApiService {
     @GET("api/devices")
     suspend fun getAllDevices(): Response<List<EnrollResponse>>
 
+    @GET("api/devices")
+    suspend fun getDeviceList(): Response<List<DeviceResponse>>
+
     @POST("api/device-info")
     suspend fun uploadDeviceInfo(@Body request: DeviceInfoRequest): Response<Unit>
 
@@ -91,6 +125,12 @@ interface EnrollmentApiService {
 
     @GET("api/dashboard/stats")
     suspend fun getDashboardStats(): Response<DashboardStats>
+
+    @POST("api/admin/register")
+    suspend fun registerAdmin(@Body request: AdminRegisterRequest): Response<AdminRegisterResponse>
+
+    @POST("api/admin/login")
+    suspend fun loginAdmin(@Body request: AdminLoginRequest): Response<AdminLoginResponse>
 }
 
 // ══════════════════════════════════════
@@ -99,9 +139,8 @@ interface EnrollmentApiService {
 
 object RetrofitClient {
 
-    // Default base URL — matches backend at server.port=8081
-    // For emulator use 10.0.2.2; for physical device use the server's LAN IP
-    private const val DEFAULT_BASE_URL = "http://10.0.2.2:8081/"
+    // Default base URL — use the physical device LAN IP to reach the backend
+    private const val DEFAULT_BASE_URL = "http://10.181.122.214:8081/"
 
     private val loggingInterceptor = HttpLoggingInterceptor().apply {
         level = HttpLoggingInterceptor.Level.BODY

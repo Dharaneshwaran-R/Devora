@@ -1,5 +1,12 @@
 package com.devora.devicemanager.ui.screens.devices
 
+import android.util.Log
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -27,24 +34,31 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.devora.devicemanager.network.DeviceResponse
+import com.devora.devicemanager.network.RetrofitClient
 import com.devora.devicemanager.ui.components.DevoraBottomNav
 import com.devora.devicemanager.ui.components.DevoraCard
 import com.devora.devicemanager.ui.components.StatusBadge
@@ -56,6 +70,7 @@ import com.devora.devicemanager.ui.theme.ChipShape
 import com.devora.devicemanager.ui.theme.DMSans
 import com.devora.devicemanager.ui.theme.Danger
 import com.devora.devicemanager.ui.theme.DarkBgBase
+import com.devora.devicemanager.ui.theme.DarkBgElevated
 import com.devora.devicemanager.ui.theme.DarkBgSurface
 import com.devora.devicemanager.ui.theme.DarkTextPrimary
 import com.devora.devicemanager.ui.theme.JetBrainsMono
@@ -68,7 +83,7 @@ import com.devora.devicemanager.ui.theme.TextMuted
 import com.devora.devicemanager.ui.theme.TextPrimary
 
 // ══════════════════════════════════════
-// DEVICE DATA
+// DEVICE DATA (mapped from API)
 // ══════════════════════════════════════
 
 data class Device(
@@ -77,10 +92,10 @@ data class Device(
     val model: String,
     val status: String,
     val api: String,
-    val initial: String
+    val initial: String,
+    val deviceId: String,
+    val lastSeen: String
 )
-
-val enrolledDevices = emptyList<Device>()
 
 // ══════════════════════════════════════
 // DEVICE LIST SCREEN
@@ -95,17 +110,57 @@ fun DeviceListScreen(
 ) {
     var searchQuery by remember { mutableStateOf("") }
     var selectedFilter by remember { mutableStateOf("ALL") }
-    val filters = listOf("ALL", "ONLINE", "OFFLINE", "FLAGGED")
+    val filters = listOf("ALL", "ONLINE", "OFFLINE")
 
     val bgColor = if (isDark) DarkBgBase else BgBase
     val textColor = if (isDark) DarkTextPrimary else TextPrimary
     val surfaceBg = if (isDark) DarkBgSurface else BgSurface
 
+    // ── Live data state ──
+    var isLoading by remember { mutableStateOf(true) }
+    var enrolledDevices by remember { mutableStateOf<List<Device>>(emptyList()) }
+    var refreshTick by remember { mutableIntStateOf(0) }
+
+    // ── Fetch from API ──
+    LaunchedEffect(refreshTick) {
+        isLoading = enrolledDevices.isEmpty()
+        try {
+            val response = RetrofitClient.api.getDeviceList()
+            if (response.isSuccessful) {
+                enrolledDevices = (response.body() ?: emptyList()).map { it.toDevice() }
+                Log.d("DeviceList", "Fetched ${enrolledDevices.size} devices")
+            } else {
+                Log.e("DeviceList", "Device fetch failed: ${response.code()}")
+            }
+        } catch (e: Exception) {
+            Log.e("DeviceList", "Failed to fetch devices: ${e.message}")
+        }
+        isLoading = false
+    }
+
+    // ── Shimmer ──
+    val shimmerTransition = rememberInfiniteTransition(label = "shimmer")
+    val shimmerAlpha by shimmerTransition.animateFloat(
+        initialValue = 0.3f,
+        targetValue = 0.7f,
+        animationSpec = infiniteRepeatable(
+            tween(800, easing = LinearEasing),
+            RepeatMode.Reverse
+        ),
+        label = "shimmerAlpha"
+    )
+
     val filteredDevices = enrolledDevices.filter { device ->
         val matchesSearch = device.name.contains(searchQuery, ignoreCase = true) ||
                 device.manufacturer.contains(searchQuery, ignoreCase = true) ||
-                device.model.contains(searchQuery, ignoreCase = true)
-        val matchesFilter = selectedFilter == "ALL" || device.status == selectedFilter
+                device.model.contains(searchQuery, ignoreCase = true) ||
+                device.deviceId.contains(searchQuery, ignoreCase = true)
+        val matchesFilter = when (selectedFilter) {
+            "ALL" -> true
+            "ONLINE" -> device.status == "ONLINE"
+            "OFFLINE" -> device.status == "OFFLINE"
+            else -> true
+        }
         matchesSearch && matchesFilter
     }
 
@@ -167,12 +222,23 @@ fun DeviceListScreen(
                     fontSize = 22.sp,
                     color = textColor
                 )
-                Icon(
-                    imageVector = Icons.Filled.FilterList,
-                    contentDescription = "Filter",
-                    tint = PurpleCore,
-                    modifier = Modifier.size(24.dp)
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    // Refresh button
+                    IconButton(onClick = { refreshTick++ }) {
+                        Icon(
+                            imageVector = Icons.Filled.Refresh,
+                            contentDescription = "Refresh",
+                            tint = PurpleCore,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                    Icon(
+                        imageVector = Icons.Filled.FilterList,
+                        contentDescription = "Filter",
+                        tint = PurpleCore,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -201,7 +267,7 @@ fun DeviceListScreen(
                     Box(modifier = Modifier.weight(1f)) {
                         if (searchQuery.isEmpty()) {
                             Text(
-                                text = "Search devices...",
+                                text = "Search by device ID or model...",
                                 fontFamily = DMSans,
                                 fontSize = 13.sp,
                                 color = TextMuted
@@ -244,6 +310,12 @@ fun DeviceListScreen(
             ) {
                 items(filters) { filter ->
                     val isSelected = selectedFilter == filter
+                    val count = when (filter) {
+                        "ALL" -> enrolledDevices.size
+                        "ONLINE" -> enrolledDevices.count { it.status == "ONLINE" }
+                        "OFFLINE" -> enrolledDevices.count { it.status == "OFFLINE" }
+                        else -> 0
+                    }
                     Box(
                         modifier = Modifier
                             .background(
@@ -263,7 +335,7 @@ fun DeviceListScreen(
                             .padding(horizontal = 16.dp, vertical = 8.dp)
                     ) {
                         Text(
-                            text = filter,
+                            text = "$filter ($count)",
                             fontFamily = if (isSelected) PlusJakartaSans else DMSans,
                             fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
                             fontSize = 12.sp,
@@ -276,7 +348,26 @@ fun DeviceListScreen(
             Spacer(modifier = Modifier.height(12.dp))
 
             // Device list
-            if (filteredDevices.isEmpty()) {
+            if (isLoading) {
+                // Shimmer loading
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    contentPadding = PaddingValues(bottom = 80.dp)
+                ) {
+                    items(4) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(80.dp)
+                                .clip(androidx.compose.foundation.shape.RoundedCornerShape(16.dp))
+                                .background(
+                                    (if (isDark) DarkBgElevated else BgElevated)
+                                        .copy(alpha = shimmerAlpha)
+                                )
+                        )
+                    }
+                }
+            } else if (filteredDevices.isEmpty()) {
                 // Empty state
                 Box(
                     modifier = Modifier
@@ -303,7 +394,8 @@ fun DeviceListScreen(
                         }
                         Spacer(modifier = Modifier.height(16.dp))
                         Text(
-                            text = "No devices enrolled yet",
+                            text = if (searchQuery.isNotEmpty()) "No devices match your search"
+                                   else "No devices enrolled yet",
                             fontFamily = PlusJakartaSans,
                             fontWeight = FontWeight.SemiBold,
                             fontSize = 16.sp,
@@ -311,7 +403,8 @@ fun DeviceListScreen(
                         )
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            text = "Tap + to enroll your first device",
+                            text = if (searchQuery.isNotEmpty()) "Try a different search term"
+                                   else "Tap + to enroll your first device",
                             fontFamily = DMSans,
                             fontWeight = FontWeight.Normal,
                             fontSize = 13.sp,
@@ -335,7 +428,7 @@ fun DeviceListScreen(
                             modifier = Modifier.clickable(
                                 interactionSource = remember { MutableInteractionSource() },
                                 indication = null,
-                                onClick = { onDeviceClick(device.name) }
+                                onClick = { onDeviceClick(device.deviceId) }
                             )
                         ) {
                             DevoraCard(accentColor = stripColor, isDark = isDark) {
@@ -355,8 +448,8 @@ fun DeviceListScreen(
                                                 } else {
                                                     Brush.linearGradient(
                                                         listOf(
-                                                            if (isDark) com.devora.devicemanager.ui.theme.DarkBgElevated else BgElevated,
-                                                            if (isDark) com.devora.devicemanager.ui.theme.DarkBgElevated else BgElevated
+                                                            if (isDark) DarkBgElevated else BgElevated,
+                                                            if (isDark) DarkBgElevated else BgElevated
                                                         )
                                                     )
                                                 },
@@ -400,7 +493,7 @@ fun DeviceListScreen(
                                             )
                                             Spacer(modifier = Modifier.width(4.dp))
                                             Text(
-                                                text = "Last seen 2m ago",
+                                                text = device.lastSeen,
                                                 fontFamily = DMSans,
                                                 fontWeight = FontWeight.Normal,
                                                 fontSize = 11.sp,
@@ -437,4 +530,27 @@ fun DeviceListScreen(
             }
         }
     }
+}
+
+/**
+ * Maps a [DeviceResponse] from the backend to a UI [Device].
+ */
+private fun DeviceResponse.toDevice(): Device {
+    val statusStr = when (status.uppercase()) {
+        "ACTIVE", "ENROLLED" -> "ONLINE"
+        "PENDING" -> "OFFLINE"
+        else -> "OFFLINE"
+    }
+    val enrolledStr = enrolledAt.take(10)
+
+    return Device(
+        name = deviceId.take(12).let { if (it.length > 8) "${it.take(8)}..." else it },
+        manufacturer = enrollmentMethod,
+        model = "Enrolled: $enrolledStr",
+        status = statusStr,
+        api = "ID: ${deviceId.take(8)}",
+        initial = deviceId.take(1).uppercase(),
+        deviceId = deviceId,
+        lastSeen = "Enrolled $enrolledStr"
+    )
 }

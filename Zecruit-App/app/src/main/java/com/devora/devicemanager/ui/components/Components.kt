@@ -120,7 +120,7 @@ fun DevoraCard(
                         )
                     }
 
-                    Box(modifier = Modifier.padding(16.dp)) {
+                    Column(modifier = Modifier.padding(16.dp)) {
                         content()
                     }
                 }

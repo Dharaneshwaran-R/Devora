@@ -1,5 +1,6 @@
 package com.devora.devicemanager.ui.screens.devices
 
+import android.util.Log
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -47,6 +48,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -66,6 +68,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.devora.devicemanager.network.DeviceResponse
+import com.devora.devicemanager.network.RetrofitClient
 import com.devora.devicemanager.ui.components.DevoraCard
 import com.devora.devicemanager.ui.components.SectionHeader
 import com.devora.devicemanager.ui.components.StatusBadge
@@ -100,15 +104,44 @@ fun DeviceDetailScreen(
     onBack: () -> Unit,
     isDark: Boolean
 ) {
-    // FIXED: Removed mockDevices lookup and replaced with placeholder Device object
-    val device = Device(
-        name = deviceId.ifEmpty { "Unknown Device" },
-        manufacturer = "Unknown",
-        model = "Unknown",
-        status = "Enrolled",
-        api = "API 35",
-        initial = deviceId.take(1).uppercase().ifEmpty { "?" }
-    )
+    // Fetch real device data from API
+    var deviceResponse by remember { mutableStateOf<DeviceResponse?>(null) }
+
+    LaunchedEffect(deviceId) {
+        try {
+            val response = RetrofitClient.api.getDeviceList()
+            if (response.isSuccessful) {
+                deviceResponse = response.body()?.find { it.deviceId == deviceId }
+            }
+        } catch (e: Exception) {
+            Log.e("DeviceDetail", "Failed to fetch device: ${e.message}")
+        }
+    }
+
+    val device = if (deviceResponse != null) {
+        val dr = deviceResponse!!
+        Device(
+            name = dr.deviceId,
+            manufacturer = dr.enrollmentMethod,
+            model = "Enrolled: ${dr.enrolledAt.take(10)}",
+            status = dr.status,
+            api = "ID: ${dr.id}",
+            initial = dr.deviceId.take(1).uppercase(),
+            deviceId = dr.deviceId,
+            lastSeen = "Enrolled ${dr.enrolledAt.take(10)}"
+        )
+    } else {
+        Device(
+            name = deviceId.ifEmpty { "Unknown Device" },
+            manufacturer = "Loading...",
+            model = "Loading...",
+            status = "PENDING",
+            api = "—",
+            initial = deviceId.take(1).uppercase().ifEmpty { "?" },
+            deviceId = deviceId,
+            lastSeen = "Unknown"
+        )
+    }
 
     var selectedTab by remember { mutableIntStateOf(0) }
     val tabs = listOf("INFO", "APPS", "ACTIVITY", "ACTIONS")
@@ -559,14 +592,15 @@ private fun InfoTab(device: Device, isDark: Boolean, textColor: Color) {
     DevoraCard(accentColor = PurpleCore, isDark = isDark) {
         SectionHeader(title = "DEVICE SUMMARY", isDark = isDark)
 
+        Spacer(Modifier.height(4.dp))
+
         val infoItems = listOf(
-            "Device Name" to device.name,
-            "Model" to device.model,
-            "Manufacturer" to device.manufacturer,
-            "API Level" to device.api,
+            "Device ID" to device.deviceId,
             "Status" to device.status,
-            "Enrollment" to "Enterprise MDM",
-            "Policy" to "Enterprise Standard"
+            "Enrollment" to device.manufacturer,
+            "Enrolled At" to device.model,
+            "Record ID" to device.api,
+            "Last Seen" to device.lastSeen
         )
 
         infoItems.forEachIndexed { index, (label, value) ->
@@ -583,9 +617,10 @@ private fun InfoTab(device: Device, isDark: Boolean, textColor: Color) {
                     fontFamily = JetBrainsMono,
                     fontSize = 13.sp,
                     color = when {
-                        value == "ONLINE" -> Success
-                        value == "FLAGGED" -> Danger
-                        value == "OFFLINE" -> TextMuted
+                        value.equals("ACTIVE", ignoreCase = true) -> Success
+                        value.equals("ONLINE", ignoreCase = true) -> Success
+                        value.equals("FLAGGED", ignoreCase = true) -> Danger
+                        value.equals("OFFLINE", ignoreCase = true) -> TextMuted
                         else -> textColor
                     },
                     fontWeight = FontWeight.Medium
@@ -602,6 +637,8 @@ private fun InfoTab(device: Device, isDark: Boolean, textColor: Color) {
     // Security Status
     DevoraCard(accentColor = Success, isDark = isDark) {
         SectionHeader(title = "SECURITY STATUS", isDark = isDark)
+
+        Spacer(Modifier.height(4.dp))
 
         val securityItems = listOf(
             Triple("Screen Lock", "Enforced", Success),

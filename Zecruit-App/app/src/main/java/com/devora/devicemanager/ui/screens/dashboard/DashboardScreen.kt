@@ -1,5 +1,7 @@
 package com.devora.devicemanager.ui.screens.dashboard
 
+import android.util.Log
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -39,7 +41,11 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -55,6 +61,8 @@ import androidx.compose.ui.unit.sp
 import com.devora.devicemanager.ui.components.DevoraBottomNav
 import com.devora.devicemanager.ui.components.DevoraCard
 import com.devora.devicemanager.ui.components.SectionHeader
+import com.devora.devicemanager.network.DashboardStats
+import com.devora.devicemanager.network.RetrofitClient
 import com.devora.devicemanager.ui.theme.BgBase
 import com.devora.devicemanager.ui.theme.BgElevated
 import com.devora.devicemanager.ui.theme.DMSans
@@ -87,13 +95,6 @@ private data class Stat(
     val color: Color
 )
 
-private val stats = listOf(
-    Stat("0", "TOTAL DEVICES", Icons.Filled.Devices, PurpleCore),
-    Stat("0", "ACTIVE NOW", Icons.Filled.CheckCircle, Success),
-    Stat("0", "VIOLATIONS", Icons.Filled.Warning, Danger),
-    Stat("0", "PENDING", Icons.Filled.Schedule, WarningColor)
-)
-
 // ══════════════════════════════════════
 // ACTIVITY DATA
 // ══════════════════════════════════════
@@ -122,6 +123,34 @@ fun DashboardScreen(
     val currentDate = remember {
         SimpleDateFormat("EEEE, MMMM d, yyyy", Locale.getDefault()).format(Date())
     }
+    var dashboardStats by remember { mutableStateOf<DashboardStats?>(null) }
+
+    LaunchedEffect(Unit) {
+        try {
+            val response = RetrofitClient.api.getDashboardStats()
+            if (response.isSuccessful) {
+                dashboardStats = response.body()
+            } else {
+                Log.e("DashboardScreen", "Stats fetch failed: ${response.code()}")
+            }
+        } catch (e: Exception) {
+            Log.e("DashboardScreen", "Failed to fetch dashboard stats", e)
+        }
+    }
+
+    val totalDevices = dashboardStats?.totalDevices ?: 0
+    val activeDevices = dashboardStats?.activeDevices ?: 0
+    val inactiveDevices = (totalDevices - activeDevices).coerceAtLeast(0)
+    val violations = dashboardStats?.violations ?: inactiveDevices
+    val onlineRatio = if (totalDevices > 0) activeDevices.toFloat() / totalDevices else 0f
+    val onlinePercent = (onlineRatio * 100).toInt()
+
+    val stats = listOf(
+        Stat(totalDevices.toString(), "TOTAL DEVICES", Icons.Filled.Devices, PurpleCore),
+        Stat(activeDevices.toString(), "ACTIVE NOW", Icons.Filled.CheckCircle, Success),
+        Stat(violations.toString(), "VIOLATIONS", Icons.Filled.Warning, Danger),
+        Stat(inactiveDevices.toString(), "PENDING", Icons.Filled.Schedule, WarningColor)
+    )
 
     Scaffold(
         bottomBar = {
@@ -388,7 +417,7 @@ fun DashboardScreen(
                         Column {
                             SectionHeader(
                                 title = "DEVICE HEALTH",
-                                actionText = "0 Total",
+                                actionText = "$totalDevices Total",
                                 isDark = isDark
                             )
 
@@ -399,14 +428,14 @@ fun DashboardScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
                                 Text(
-                                    text = "0 ONLINE",
+                                    text = "$activeDevices ONLINE",
                                     fontFamily = PlusJakartaSans,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 16.sp,
                                     color = Success
                                 )
                                 Text(
-                                    text = "0 OFFLINE",
+                                    text = "$inactiveDevices OFFLINE",
                                     fontFamily = PlusJakartaSans,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 16.sp,
@@ -431,7 +460,7 @@ fun DashboardScreen(
                                             brush = Brush.horizontalGradient(
                                                 colors = listOf(PurpleCore, PurpleBright)
                                             ),
-                                            size = Size(size.width * 0f, size.height),
+                                            size = Size(size.width * onlineRatio, size.height),
                                             cornerRadius = CornerRadius(6.dp.toPx())
                                         )
                                     }
@@ -444,14 +473,14 @@ fun DashboardScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
                                 Text(
-                                    text = "0%",
+                                    text = "$onlinePercent%",
                                     fontFamily = JetBrainsMono,
                                     fontWeight = FontWeight.Normal,
                                     fontSize = 11.sp,
                                     color = TextMuted
                                 )
                                 Text(
-                                    text = "0%",
+                                    text = "${100 - onlinePercent}%",
                                     fontFamily = JetBrainsMono,
                                     fontWeight = FontWeight.Normal,
                                     fontSize = 11.sp,

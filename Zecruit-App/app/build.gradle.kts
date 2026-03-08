@@ -75,6 +75,12 @@ dependencies {
     // QR Code generation
     implementation(libs.zxing.core)
 
+    // CameraX + ML Kit Barcode Scanning
+    implementation(libs.camerax.camera2)
+    implementation(libs.camerax.lifecycle)
+    implementation(libs.camerax.view)
+    implementation(libs.mlkit.barcode)
+
     // JSON
     implementation(libs.gson)
 

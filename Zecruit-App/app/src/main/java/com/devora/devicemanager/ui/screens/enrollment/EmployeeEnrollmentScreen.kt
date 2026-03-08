@@ -1,6 +1,15 @@
 package com.devora.devicemanager.ui.screens.enrollment
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.os.Build
+import android.util.Log
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageAnalysis
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.view.PreviewView
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -87,6 +96,10 @@ import com.devora.devicemanager.enrollment.EnrollmentViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.ContextCompat
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -322,7 +335,28 @@ fun EmployeeEnrollmentScreen(
 
                     Spacer(Modifier.height(16.dp))
 
-                    // ── CAMERA VIEWFINDER ──
+                    // ── REAL CAMERA VIEWFINDER ──
+                    val context = LocalContext.current
+                    val lifecycleOwner = LocalLifecycleOwner.current
+                    var hasCameraPermission by remember {
+                        mutableStateOf(
+                            ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
+                                    PackageManager.PERMISSION_GRANTED
+                        )
+                    }
+
+                    val permissionLauncher = rememberLauncherForActivityResult(
+                        contract = ActivityResultContracts.RequestPermission()
+                    ) { granted ->
+                        hasCameraPermission = granted
+                    }
+
+                    LaunchedEffect(Unit) {
+                        if (!hasCameraPermission) {
+                            permissionLauncher.launch(Manifest.permission.CAMERA)
+                        }
+                    }
+
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -331,72 +365,128 @@ fun EmployeeEnrollmentScreen(
                             .background(Color.Black)
                             .border(1.dp, Color(0x407B61FF), RoundedCornerShape(16.dp))
                     ) {
-                        // Corner brackets
-                        Canvas(Modifier.fillMaxSize()) {
-                            val bracketLen = 28.dp.toPx()
-                            val sw = 3.dp.toPx()
-                            val m = 20.dp.toPx()
+                        if (hasCameraPermission) {
+                            // Real CameraX preview with ML Kit QR scanning
+                            AndroidView(
+                                factory = { ctx ->
+                                    val previewView = PreviewView(ctx).apply {
+                                        implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+                                    }
 
-                            // Top-left
-                            drawLine(Purple, Offset(m, m + bracketLen), Offset(m, m), sw, StrokeCap.Round)
-                            drawLine(Purple, Offset(m, m), Offset(m + bracketLen, m), sw, StrokeCap.Round)
-                            // Top-right
-                            drawLine(Purple, Offset(size.width - m - bracketLen, m), Offset(size.width - m, m), sw, StrokeCap.Round)
-                            drawLine(Purple, Offset(size.width - m, m), Offset(size.width - m, m + bracketLen), sw, StrokeCap.Round)
-                            // Bottom-left
-                            drawLine(Purple, Offset(m, size.height - m - bracketLen), Offset(m, size.height - m), sw, StrokeCap.Round)
-                            drawLine(Purple, Offset(m, size.height - m), Offset(m + bracketLen, size.height - m), sw, StrokeCap.Round)
-                            // Bottom-right
-                            drawLine(Purple, Offset(size.width - m - bracketLen, size.height - m), Offset(size.width - m, size.height - m), sw, StrokeCap.Round)
-                            drawLine(Purple, Offset(size.width - m, size.height - m - bracketLen), Offset(size.width - m, size.height - m), sw, StrokeCap.Round)
-                        }
+                                    val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
+                                    cameraProviderFuture.addListener({
+                                        val cameraProvider = cameraProviderFuture.get()
 
-                        // Animated scan line
-                        val infiniteTransition = rememberInfiniteTransition(label = "scan")
-                        val scanY by infiniteTransition.animateFloat(
-                            initialValue = 0f,
-                            targetValue = 1f,
-                            animationSpec = infiniteRepeatable(
-                                tween(2000, easing = LinearEasing),
-                                RepeatMode.Reverse
-                            ),
-                            label = "scanY"
-                        )
+                                        val preview = androidx.camera.core.Preview.Builder().build().also {
+                                            it.setSurfaceProvider(previewView.surfaceProvider)
+                                        }
 
-                        Canvas(Modifier.fillMaxSize()) {
-                            drawRect(
-                                brush = Brush.horizontalGradient(
-                                    colors = listOf(
-                                        Color.Transparent,
-                                        Purple.copy(alpha = 0.8f),
-                                        Purple,
-                                        Purple.copy(alpha = 0.8f),
-                                        Color.Transparent
-                                    )
+                                        val imageAnalysis = ImageAnalysis.Builder()
+                                            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                                            .build()
+                                            .also { analysis ->
+                                                analysis.setAnalyzer(
+                                                    ContextCompat.getMainExecutor(ctx),
+                                                    QrCodeAnalyzer { qrValue ->
+                                                        Log.d("QRScan", "Detected QR: $qrValue")
+                                                        // Feed detected token to ViewModel
+                                                        enrollmentVm.onTokenChanged(qrValue)
+                                                        enrollmentVm.enrollWithToken()
+                                                    }
+                                                )
+                                            }
+
+                                        try {
+                                            cameraProvider.unbindAll()
+                                            cameraProvider.bindToLifecycle(
+                                                lifecycleOwner,
+                                                CameraSelector.DEFAULT_BACK_CAMERA,
+                                                preview,
+                                                imageAnalysis
+                                            )
+                                        } catch (e: Exception) {
+                                            Log.e("QRScan", "Camera bind failed: ${e.message}")
+                                        }
+                                    }, ContextCompat.getMainExecutor(ctx))
+
+                                    previewView
+                                },
+                                modifier = Modifier.fillMaxSize()
+                            )
+
+                            // Corner brackets overlay
+                            Canvas(Modifier.fillMaxSize()) {
+                                val bracketLen = 28.dp.toPx()
+                                val sw = 3.dp.toPx()
+                                val m = 20.dp.toPx()
+
+                                drawLine(Purple, Offset(m, m + bracketLen), Offset(m, m), sw, StrokeCap.Round)
+                                drawLine(Purple, Offset(m, m), Offset(m + bracketLen, m), sw, StrokeCap.Round)
+                                drawLine(Purple, Offset(size.width - m - bracketLen, m), Offset(size.width - m, m), sw, StrokeCap.Round)
+                                drawLine(Purple, Offset(size.width - m, m), Offset(size.width - m, m + bracketLen), sw, StrokeCap.Round)
+                                drawLine(Purple, Offset(m, size.height - m - bracketLen), Offset(m, size.height - m), sw, StrokeCap.Round)
+                                drawLine(Purple, Offset(m, size.height - m), Offset(m + bracketLen, size.height - m), sw, StrokeCap.Round)
+                                drawLine(Purple, Offset(size.width - m - bracketLen, size.height - m), Offset(size.width - m, size.height - m), sw, StrokeCap.Round)
+                                drawLine(Purple, Offset(size.width - m, size.height - m - bracketLen), Offset(size.width - m, size.height - m), sw, StrokeCap.Round)
+                            }
+
+                            // Animated scan line
+                            val infiniteTransition = rememberInfiniteTransition(label = "scan")
+                            val scanY by infiniteTransition.animateFloat(
+                                initialValue = 0f,
+                                targetValue = 1f,
+                                animationSpec = infiniteRepeatable(
+                                    tween(2000, easing = LinearEasing),
+                                    RepeatMode.Reverse
                                 ),
-                                topLeft = Offset(0f, size.height * scanY),
-                                size = Size(size.width, 3.dp.toPx())
+                                label = "scanY"
                             )
-                        }
 
-                        // Center label
-                        Column(
-                            modifier = Modifier.align(Alignment.Center),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            Icon(
-                                Icons.Outlined.QrCodeScanner,
-                                contentDescription = null,
-                                tint = Purple.copy(alpha = 0.4f),
-                                modifier = Modifier.size(48.dp)
-                            )
-                            Spacer(Modifier.height(8.dp))
-                            Text(
-                                "Point camera at QR code",
-                                fontFamily = DMSans,
-                                fontSize = 12.sp,
-                                color = TextDim
-                            )
+                            Canvas(Modifier.fillMaxSize()) {
+                                drawRect(
+                                    brush = Brush.horizontalGradient(
+                                        colors = listOf(
+                                            Color.Transparent,
+                                            Purple.copy(alpha = 0.8f),
+                                            Purple,
+                                            Purple.copy(alpha = 0.8f),
+                                            Color.Transparent
+                                        )
+                                    ),
+                                    topLeft = Offset(0f, size.height * scanY),
+                                    size = Size(size.width, 3.dp.toPx())
+                                )
+                            }
+                        } else {
+                            // No camera permission — show placeholder
+                            Column(
+                                modifier = Modifier.align(Alignment.Center),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Icon(
+                                    Icons.Outlined.QrCodeScanner,
+                                    contentDescription = null,
+                                    tint = Purple.copy(alpha = 0.4f),
+                                    modifier = Modifier.size(48.dp)
+                                )
+                                Spacer(Modifier.height(8.dp))
+                                Text(
+                                    "Camera permission required",
+                                    fontFamily = DMSans,
+                                    fontSize = 12.sp,
+                                    color = TextDim
+                                )
+                                Spacer(Modifier.height(8.dp))
+                                Text(
+                                    "Tap to grant permission",
+                                    fontFamily = DMSans,
+                                    fontSize = 11.sp,
+                                    color = Purple,
+                                    modifier = Modifier.clickable {
+                                        permissionLauncher.launch(Manifest.permission.CAMERA)
+                                    }
+                                )
+                            }
                         }
                     }
 

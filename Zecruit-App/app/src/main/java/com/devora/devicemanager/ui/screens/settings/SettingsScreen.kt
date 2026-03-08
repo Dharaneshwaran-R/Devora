@@ -49,21 +49,31 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.devora.devicemanager.ui.theme.Warning
+import android.app.admin.DevicePolicyManager
+import android.os.UserManager
+import android.widget.Toast
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.devora.devicemanager.enrollment.DevicePolicyHelper
+import com.devora.devicemanager.network.RetrofitClient
+import com.devora.devicemanager.session.SessionManager
+import com.devora.devicemanager.sync.SyncManager
+import kotlinx.coroutines.launch
 import com.devora.devicemanager.ui.components.ButtonVariant
 import com.devora.devicemanager.ui.components.DevoraBottomNav
 import com.devora.devicemanager.ui.components.DevoraButton
@@ -109,6 +119,13 @@ fun SettingsScreen(
     onSignOut: () -> Unit,
     onNavigate: (String) -> Unit
 ) {
+    val context = LocalContext.current
+    val adminName = remember { SessionManager.getAdminName(context).ifEmpty { "Administrator" } }
+    val adminEmail = remember { SessionManager.getAdminEmail(context).ifEmpty { "admin@enterprise.com" } }
+    val adminInitial = remember { adminName.firstOrNull()?.uppercase() ?: "A" }
+    val policyHelper = remember { DevicePolicyHelper(context) }
+    val coroutineScope = rememberCoroutineScope()
+
     var darkMode by remember { mutableStateOf(isDark) }
     var factoryReset by remember { mutableStateOf(true) }
     var screenLock by remember { mutableStateOf(true) }
@@ -116,10 +133,13 @@ fun SettingsScreen(
     var cameraDisable by remember { mutableStateOf(false) }
     var bgSync by remember { mutableStateOf(true) }
     var wifiOnly by remember { mutableStateOf(false) }
-    var serverUrl by remember { mutableStateOf("https://mdm.enterprise.com/api") }
-    var syncInterval by remember { mutableStateOf("30m") }
+    var serverUrl by remember { mutableStateOf("http://10.0.2.2:8081/") }
+    var syncInterval by remember { mutableStateOf("15m") }
     var showSignOutDialog by remember { mutableStateOf(false) }
     var connectionStatus by remember { mutableStateOf<String?>(null) }
+    var isSyncing by remember { mutableStateOf(false) }
+    var lastSyncTime by remember { mutableStateOf<String?>(null) }
+    var connectionLatency by remember { mutableStateOf<String?>(null) }
 
     // Notification preferences
     var notifySecurityViolations by remember { mutableStateOf(true) }
@@ -182,7 +202,7 @@ fun SettingsScreen(
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                text = "A",
+                                text = adminInitial,
                                 fontFamily = PlusJakartaSans,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 22.sp,
@@ -192,7 +212,7 @@ fun SettingsScreen(
                         Spacer(modifier = Modifier.width(16.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "Administrator",
+                                text = adminName,
                                 fontFamily = PlusJakartaSans,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 16.sp,
@@ -206,7 +226,7 @@ fun SettingsScreen(
                                 color = PurpleCore
                             )
                             Text(
-                                text = "admin@enterprise.com",
+                                text = adminEmail,
                                 fontFamily = DMSans,
                                 fontWeight = FontWeight.Normal,
                                 fontSize = 12.sp,
@@ -323,10 +343,60 @@ fun SettingsScreen(
                                     checked = checked,
                                     onCheckedChange = { value ->
                                         when (policy.key) {
-                                            "factoryReset" -> factoryReset = value
-                                            "screenLock" -> screenLock = value
-                                            "appRestrict" -> appRestrict = value
-                                            "cameraDisable" -> cameraDisable = value
+                                            "factoryReset" -> {
+                                                factoryReset = value
+                                                Toast.makeText(context, "Factory Reset Protection ${if (value) "enabled" else "disabled"}", Toast.LENGTH_SHORT).show()
+                                            }
+                                            "screenLock" -> {
+                                                if (policyHelper.isDeviceOwner) {
+                                                    try {
+                                                        val dpm = context.getSystemService(android.content.Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
+                                                        val adminComponent = com.devora.devicemanager.AdminReceiver.getComponentName(context)
+                                                        if (value) {
+                                                            dpm.setMaximumTimeToLock(adminComponent, 30000L)
+                                                        } else {
+                                                            dpm.setMaximumTimeToLock(adminComponent, 0L)
+                                                        }
+                                                        screenLock = value
+                                                        Toast.makeText(context, "Screen Lock ${if (value) "enforced (30s)" else "relaxed"}", Toast.LENGTH_SHORT).show()
+                                                    } catch (e: Exception) {
+                                                        Toast.makeText(context, "Failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                                                    }
+                                                } else {
+                                                    screenLock = value
+                                                    Toast.makeText(context, "Not Device Owner — policy simulated", Toast.LENGTH_SHORT).show()
+                                                }
+                                            }
+                                            "appRestrict" -> {
+                                                if (policyHelper.isDeviceOwner) {
+                                                    try {
+                                                        val dpm = context.getSystemService(android.content.Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
+                                                        val adminComponent = com.devora.devicemanager.AdminReceiver.getComponentName(context)
+                                                        if (value) {
+                                                            dpm.addUserRestriction(adminComponent, UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES)
+                                                        } else {
+                                                            dpm.clearUserRestriction(adminComponent, UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES)
+                                                        }
+                                                        appRestrict = value
+                                                        Toast.makeText(context, "App Install Restriction ${if (value) "enabled" else "disabled"}", Toast.LENGTH_SHORT).show()
+                                                    } catch (e: Exception) {
+                                                        Toast.makeText(context, "Failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                                                    }
+                                                } else {
+                                                    appRestrict = value
+                                                    Toast.makeText(context, "Not Device Owner — policy simulated", Toast.LENGTH_SHORT).show()
+                                                }
+                                            }
+                                            "cameraDisable" -> {
+                                                val success = policyHelper.setCameraDisabled(value)
+                                                if (success) {
+                                                    cameraDisable = value
+                                                    Toast.makeText(context, "Camera ${if (value) "disabled" else "enabled"}", Toast.LENGTH_SHORT).show()
+                                                } else {
+                                                    cameraDisable = value
+                                                    Toast.makeText(context, "Not Device Owner — policy simulated", Toast.LENGTH_SHORT).show()
+                                                }
+                                            }
                                         }
                                     },
                                     colors = switchColors
@@ -383,18 +453,40 @@ fun SettingsScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             DevoraButton(
-                                text = "Test Connection",
-                                onClick = { connectionStatus = "connected" },
+                                text = if (connectionStatus == "testing") "Testing..." else "Test Connection",
+                                onClick = {
+                                    coroutineScope.launch {
+                                        connectionStatus = "testing"
+                                        val startTime = System.currentTimeMillis()
+                                        try {
+                                            val response = RetrofitClient.api.getDashboardStats()
+                                            val elapsed = System.currentTimeMillis() - startTime
+                                            connectionLatency = "${elapsed}ms"
+                                            connectionStatus = if (response.isSuccessful) "connected" else "failed"
+                                        } catch (e: Exception) {
+                                            connectionStatus = "failed"
+                                            connectionLatency = null
+                                        }
+                                    }
+                                },
                                 variant = ButtonVariant.OUTLINE,
                                 isDark = isDark
                             )
                             connectionStatus?.let { status ->
                                 Text(
-                                    text = if (status == "connected") "● Connected 12ms" else "● Failed",
+                                    text = when (status) {
+                                        "testing" -> "● Testing..."
+                                        "connected" -> "● Connected ${connectionLatency ?: ""}"
+                                        else -> "● Connection Failed"
+                                    },
                                     fontFamily = JetBrainsMono,
                                     fontWeight = FontWeight.Normal,
                                     fontSize = 12.sp,
-                                    color = if (status == "connected") Success else Danger
+                                    color = when (status) {
+                                        "testing" -> PurpleCore
+                                        "connected" -> Success
+                                        else -> Danger
+                                    }
                                 )
                             }
                         }
@@ -460,7 +552,7 @@ fun SettingsScreen(
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "Today 10:27 AM",
+                                text = lastSyncTime ?: "No sync yet",
                                 fontFamily = JetBrainsMono,
                                 fontWeight = FontWeight.Normal,
                                 fontSize = 12.sp,
@@ -526,8 +618,27 @@ fun SettingsScreen(
                         )
 
                         DevoraButton(
-                            text = "Sync Now",
-                            onClick = { },
+                            text = if (isSyncing) "Syncing..." else "Sync Now",
+                            onClick = {
+                                if (!isSyncing) {
+                                    coroutineScope.launch {
+                                        isSyncing = true
+                                        try {
+                                            val result = SyncManager.syncDeviceData(context, "admin")
+                                            val timeFormat = java.text.SimpleDateFormat("hh:mm a", java.util.Locale.getDefault())
+                                            lastSyncTime = "Today ${timeFormat.format(java.util.Date())}"
+                                            if (result.success) {
+                                                Toast.makeText(context, "Sync completed", Toast.LENGTH_SHORT).show()
+                                            } else {
+                                                Toast.makeText(context, "Sync failed: ${result.message}", Toast.LENGTH_SHORT).show()
+                                            }
+                                        } catch (e: Exception) {
+                                            Toast.makeText(context, "Sync error: ${e.message}", Toast.LENGTH_SHORT).show()
+                                        }
+                                        isSyncing = false
+                                    }
+                                }
+                            },
                             variant = ButtonVariant.OUTLINE,
                             modifier = Modifier.fillMaxWidth(),
                             isDark = isDark

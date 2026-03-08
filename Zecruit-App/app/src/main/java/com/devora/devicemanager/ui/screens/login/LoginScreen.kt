@@ -24,8 +24,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.LightMode
+import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Visibility
@@ -58,7 +58,12 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.util.Log
+import androidx.compose.ui.platform.LocalContext
 import com.devora.devicemanager.R
+import com.devora.devicemanager.network.AdminLoginRequest
+import com.devora.devicemanager.network.RetrofitClient
+import com.devora.devicemanager.session.SessionManager
 import com.devora.devicemanager.ui.components.ButtonVariant
 import com.devora.devicemanager.ui.components.DevoraButton
 import com.devora.devicemanager.ui.theme.BgElevated
@@ -71,8 +76,6 @@ import com.devora.devicemanager.ui.theme.DarkBgSurface
 import com.devora.devicemanager.ui.theme.DarkTextPrimary
 import com.devora.devicemanager.ui.theme.InputShape
 import com.devora.devicemanager.ui.theme.PlusJakartaSans
-import com.devora.devicemanager.ui.theme.PurpleBorder
-import com.devora.devicemanager.ui.theme.PurpleBright
 import com.devora.devicemanager.ui.theme.PurpleCore
 import com.devora.devicemanager.ui.theme.TextMuted
 import com.devora.devicemanager.ui.theme.TextPrimary
@@ -81,22 +84,24 @@ import kotlinx.coroutines.launch
 @Composable
 fun LoginScreen(
     onLoginSuccess: () -> Unit,
+    onAdminRegister: () -> Unit = {},
     onEmployeeRegister: () -> Unit = {},
     onEmployeeEnroll: () -> Unit = {},
     isDark: Boolean,
     onThemeToggle: () -> Unit
 ) {
     var selectedRole by remember { mutableIntStateOf(0) } // 0=Admin, 1=Employee
-    var adminId by remember { mutableStateOf("") }
+    var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var showPassword by remember { mutableStateOf(false) }
     var isLoading by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
 
     // Reset fields when LoginScreen reappears (e.g., after sign out)
     LaunchedEffect(Unit) {
-        adminId = ""
+        email = ""
         password = ""
         showPassword = false
     }
@@ -244,9 +249,9 @@ fun LoginScreen(
                         if (selectedRole == 0) {
                             // ══════ ADMIN LOGIN FIELDS ══════
 
-                            // 5. Admin ID label
+                            // 5. Email label
                             Text(
-                                text = "Admin ID",
+                                text = "Email",
                                 fontFamily = DMSans,
                                 fontWeight = FontWeight.Normal,
                                 fontSize = 13.sp,
@@ -256,7 +261,7 @@ fun LoginScreen(
 
                             Spacer(modifier = Modifier.height(8.dp))
 
-                            // 6. Admin ID TextField
+                            // 6. Email TextField
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -267,24 +272,24 @@ fun LoginScreen(
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Icon(
-                                        imageVector = Icons.Filled.Person,
+                                        imageVector = Icons.Filled.Email,
                                         contentDescription = null,
                                         tint = PurpleCore,
                                         modifier = Modifier.size(20.dp)
                                     )
                                     Spacer(modifier = Modifier.width(12.dp))
                                     Box(modifier = Modifier.weight(1f)) {
-                                        if (adminId.isEmpty()) {
+                                        if (email.isEmpty()) {
                                             Text(
-                                                text = "Enter admin ID",
+                                                text = "Enter your email",
                                                 fontFamily = DMSans,
                                                 fontSize = 14.sp,
                                                 color = TextMuted
                                             )
                                         }
                                         BasicTextField(
-                                            value = adminId,
-                                            onValueChange = { adminId = it },
+                                            value = email,
+                                            onValueChange = { email = it },
                                             textStyle = TextStyle(
                                                 fontFamily = DMSans,
                                                 fontSize = 14.sp,
@@ -378,13 +383,34 @@ fun LoginScreen(
                             DevoraButton(
                                 text = "Sign In",
                                 onClick = {
-                                    isLoading = true
-                                    if (adminId == "admin" && password == "admin123") {
-                                        onLoginSuccess()
-                                    } else {
-                                        isLoading = false
+                                    if (email.isBlank() || password.isBlank()) {
                                         scope.launch {
-                                            snackbarHostState.showSnackbar("Invalid credentials")
+                                            snackbarHostState.showSnackbar("Email and password are required")
+                                        }
+                                        return@DevoraButton
+                                    }
+                                    isLoading = true
+                                    scope.launch {
+                                        try {
+                                            val response = RetrofitClient.api.loginAdmin(
+                                                AdminLoginRequest(
+                                                    email = email.trim(),
+                                                    password = password
+                                                )
+                                            )
+                                            if (response.isSuccessful && response.body()?.success == true) {
+                                                val adminName = response.body()?.name ?: ""
+                                                SessionManager.saveSession(context, adminName, email.trim())
+                                                onLoginSuccess()
+                                            } else {
+                                                val msg = response.body()?.message ?: "Invalid credentials"
+                                                snackbarHostState.showSnackbar(msg)
+                                            }
+                                        } catch (e: Exception) {
+                                            Log.e("LoginScreen", "Login failed: ${e.message}")
+                                            snackbarHostState.showSnackbar("Network error: ${e.message}")
+                                        } finally {
+                                            isLoading = false
                                         }
                                     }
                                 },
@@ -395,13 +421,14 @@ fun LoginScreen(
 
                             Spacer(modifier = Modifier.height(16.dp))
 
-                            // 10. Forgot credentials
+                            // 10. Register link
                             Text(
-                                text = "Forgot credentials? Contact IT Admin",
+                                text = "Don't have an account? Register",
                                 fontFamily = DMSans,
-                                fontWeight = FontWeight.Normal,
-                                fontSize = 12.sp,
-                                color = TextMuted
+                                fontWeight = FontWeight.Medium,
+                                fontSize = 13.sp,
+                                color = PurpleCore,
+                                modifier = Modifier.clickable { onAdminRegister() }
                             )
                         } else {
                             // ══════ EMPLOYEE LOGIN ══════

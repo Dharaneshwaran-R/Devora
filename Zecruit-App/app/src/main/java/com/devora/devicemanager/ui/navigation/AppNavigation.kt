@@ -16,6 +16,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.devora.devicemanager.MainActivity
 import com.devora.devicemanager.ui.screens.dashboard.DashboardScreen
+import com.devora.devicemanager.session.SessionManager
 import com.devora.devicemanager.ui.screens.devices.DeviceDetailScreen
 import com.devora.devicemanager.ui.screens.devices.DeviceListScreen
 import com.devora.devicemanager.ui.screens.employee.EmployeeRegisterScreen
@@ -25,6 +26,7 @@ import com.devora.devicemanager.ui.screens.enrollment.EmployeeEnrollmentScreen
 import com.devora.devicemanager.ui.screens.login.LoginScreen
 import com.devora.devicemanager.ui.screens.settings.SettingsScreen
 import com.devora.devicemanager.ui.screens.splash.SplashScreen
+import com.devora.devicemanager.ui.screens.register.AdminRegisterScreen
 import com.devora.devicemanager.ui.viewmodel.AuthViewModel
 
 @Composable
@@ -69,9 +71,11 @@ fun AppNavigation(
         // SPLASH
         // ═══════════════════════════════════
         composable("splash") {
+            val context = LocalContext.current
             SplashScreen(
                 onSplashFinished = {
-                    navController.navigate("login") {
+                    val dest = if (SessionManager.isLoggedIn(context)) "dashboard" else "login"
+                    navController.navigate(dest) {
                         popUpTo("splash") { inclusive = true }
                     }
                 }
@@ -90,6 +94,9 @@ fun AppNavigation(
                         launchSingleTop = true
                     }
                 },
+                onAdminRegister = {
+                    navController.navigate("admin_register")
+                },
                 onEmployeeRegister = {
                     navController.navigate("employee_register")
                 },
@@ -98,6 +105,22 @@ fun AppNavigation(
                 },
                 isDark = isDark,
                 onThemeToggle = onThemeToggle
+            )
+        }
+
+        // ═══════════════════════════════════
+        // ADMIN REGISTRATION
+        // ═══════════════════════════════════
+        composable("admin_register") {
+            AdminRegisterScreen(
+                onRegisterSuccess = {
+                    navController.navigate("login") {
+                        popUpTo("admin_register") { inclusive = true }
+                        launchSingleTop = true
+                    }
+                },
+                onBackToLogin = { navController.popBackStack() },
+                isDark = isDark
             )
         }
 
