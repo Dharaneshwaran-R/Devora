@@ -16,8 +16,8 @@ object ApiConfig {
     /** Emulator → host localhost (10.0.2.2 maps to host machine) */
     const val EMULATOR_BASE_URL = "http://10.0.2.2:8080/"
 
-    /** Phone → use your laptop's WiFi IP */
-    const val PHONE_BASE_URL = "http://10.181.122.223:8080/"
+    /** Production backend hosted on Railway */
+    const val PHONE_BASE_URL = "https://devora-production-dd2e.up.railway.app/"
 
     /** Active base URL — change this when switching between emulator and phone */
     var BASE_URL: String = PHONE_BASE_URL

@@ -101,6 +101,8 @@ import com.devora.devicemanager.ui.theme.TextMuted
 import com.devora.devicemanager.ui.theme.TextPrimary
 import com.devora.devicemanager.ui.theme.Warning
 import com.devora.devicemanager.enrollment.QrProvisioningHelper
+import com.devora.devicemanager.network.GenerateEnrollmentTokenRequest
+import com.devora.devicemanager.network.RetrofitClient
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -178,13 +180,6 @@ fun AdminGenerateEnrollmentScreen(
                 status = "PENDING"
             )
         )
-    }
-
-    fun generateToken(): String {
-        val chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-        return "DEV-" + (1..3).joinToString("-") {
-            (1..4).map { chars.random() }.joinToString("")
-        }
     }
 
     Scaffold(
@@ -335,10 +330,24 @@ fun AdminGenerateEnrollmentScreen(
                             }
                             coroutineScope.launch {
                                 isGenerating = true
-                                delay(1500)
-                                generatedToken = generateToken()
+                                try {
+                                    val response = RetrofitClient.api.generateEnrollmentToken(
+                                        GenerateEnrollmentTokenRequest(
+                                            employeeId = assignedEmployee.trim(),
+                                            type = enrollType
+                                        )
+                                    )
+
+                                    if (response.isSuccessful && response.body()?.token != null) {
+                                        generatedToken = response.body()!!.token
+                                        screenState = "GENERATED"
+                                    } else {
+                                        snackbarHostState.showSnackbar("Failed to generate enrollment token")
+                                    }
+                                } catch (_: Exception) {
+                                    snackbarHostState.showSnackbar("Failed to generate enrollment token")
+                                }
                                 isGenerating = false
-                                screenState = "GENERATED"
                             }
                         },
                         modifier = Modifier

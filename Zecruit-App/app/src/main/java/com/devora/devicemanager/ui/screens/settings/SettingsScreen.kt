@@ -48,7 +48,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import com.devora.devicemanager.ui.theme.Warning
 import android.app.admin.DevicePolicyManager
 import android.os.UserManager
 import android.widget.Toast
@@ -69,6 +68,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.navigation.NavHostController
 import com.devora.devicemanager.enrollment.DevicePolicyHelper
 import com.devora.devicemanager.network.RetrofitClient
 import com.devora.devicemanager.session.SessionManager
@@ -116,7 +116,7 @@ private data class PolicyItem(
 fun SettingsScreen(
     isDark: Boolean,
     onThemeToggle: () -> Unit,
-    onSignOut: () -> Unit,
+    navController: NavHostController,
     onNavigate: (String) -> Unit
 ) {
     val context = LocalContext.current
@@ -133,7 +133,7 @@ fun SettingsScreen(
     var cameraDisable by remember { mutableStateOf(false) }
     var bgSync by remember { mutableStateOf(true) }
     var wifiOnly by remember { mutableStateOf(false) }
-    var serverUrl by remember { mutableStateOf("http://10.181.122.223:8080/") }
+    var serverUrl by remember { mutableStateOf("https://devora-production-dd2e.up.railway.app/") }
     var syncInterval by remember { mutableStateOf("15m") }
     var showSignOutDialog by remember { mutableStateOf(false) }
     var connectionStatus by remember { mutableStateOf<String?>(null) }
@@ -825,165 +825,95 @@ fun SettingsScreen(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 32.dp)
-                    .clip(RoundedCornerShape(24.dp))
-                    .background(
-                        if (isDark) Color(0xFF1A1A24) else Color(0xFFFFFFFF)
-                    )
-                    .border(
-                        1.dp,
-                        Danger.copy(alpha = 0.20f),
-                        RoundedCornerShape(24.dp)
-                    )
+                    .padding(horizontal = 24.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Color.White)
+                    .padding(24.dp)
             ) {
-                Column(
-                    modifier = Modifier.padding(28.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    // Warning icon circle
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Box(
                         modifier = Modifier
                             .size(72.dp)
                             .clip(CircleShape)
-                            .background(
-                                Brush.radialGradient(
-                                    colors = listOf(
-                                        Danger.copy(alpha = 0.15f),
-                                        Danger.copy(alpha = 0.05f)
-                                    )
-                                )
-                            )
-                            .border(1.dp, Danger.copy(alpha = 0.25f), CircleShape),
+                            .background(PurpleCore.copy(alpha = 0.14f)),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            Icons.AutoMirrored.Outlined.Logout,
-                            null,
-                            tint = Danger,
-                            modifier = Modifier.size(30.dp)
+                            imageVector = Icons.AutoMirrored.Outlined.Logout,
+                            contentDescription = null,
+                            tint = Color(0xFFFF4444),
+                            modifier = Modifier.size(48.dp)
                         )
                     }
 
-                    Spacer(Modifier.height(20.dp))
+                    Spacer(modifier = Modifier.height(18.dp))
 
                     Text(
-                        "Sign Out?",
+                        text = "Sign Out",
                         fontFamily = PlusJakartaSans,
                         fontWeight = FontWeight.Bold,
                         fontSize = 20.sp,
-                        color = if (isDark) Color(0xFFF0F2F5) else Color(0xFF1D1D21)
+                        color = Color(0xFF1A1A2E)
                     )
 
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
 
                     Text(
-                        "You will be signed out of the\nDevora admin session.",
-                        fontFamily = DMSans,
-                        fontSize = 13.sp,
-                        color = TextMuted,
+                        text = "Are you sure you want to\nsign out of DEVORA?\nYou will need to log in\nagain to access the app.",
+                        fontFamily = PlusJakartaSans,
+                        fontSize = 14.sp,
+                        color = Color(0xFF666666),
                         textAlign = TextAlign.Center,
                         lineHeight = 20.sp
                     )
 
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(24.dp))
 
-                    // Warning info box
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(Warning.copy(alpha = 0.08f))
-                            .border(
-                                1.dp,
-                                Warning.copy(alpha = 0.25f),
-                                RoundedCornerShape(10.dp)
-                            )
-                            .padding(12.dp)
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                Icons.Outlined.Info,
-                                null,
-                                tint = Warning,
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            Text(
-                                "Background monitoring will pause until next login",
-                                fontFamily = DMSans,
-                                fontSize = 11.sp,
-                                color = Warning,
-                                lineHeight = 16.sp
-                            )
-                        }
-                    }
-
-                    Spacer(Modifier.height(24.dp))
-
-                    // Action buttons
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        // Cancel
                         Box(
                             modifier = Modifier
                                 .weight(1f)
-                                .height(46.dp)
+                                .height(48.dp)
                                 .clip(RoundedCornerShape(12.dp))
-                                .background(
-                                    if (isDark) Color(0xFF242430) else Color(0xFFE9EEF3)
-                                )
+                                .border(1.dp, PurpleCore, RoundedCornerShape(12.dp))
                                 .clickable { showSignOutDialog = false },
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                "Cancel",
+                                text = "Cancel",
                                 fontFamily = PlusJakartaSans,
                                 fontWeight = FontWeight.SemiBold,
                                 fontSize = 14.sp,
-                                color = if (isDark) Color(0xFF8899A6) else Color(0xFF536471)
+                                color = PurpleCore
                             )
                         }
 
-                        // Sign Out confirm
                         Box(
                             modifier = Modifier
                                 .weight(1f)
-                                .height(46.dp)
+                                .height(48.dp)
                                 .clip(RoundedCornerShape(12.dp))
-                                .background(
-                                    Brush.linearGradient(
-                                        colors = listOf(
-                                            Color(0xFFFF6B6B),
-                                            Color(0xFFE54545)
-                                        ),
-                                        start = Offset(0f, 0f),
-                                        end = Offset(Float.MAX_VALUE, Float.MAX_VALUE)
-                                    )
-                                )
+                                .background(Color(0xFFFF4444))
                                 .clickable {
                                     showSignOutDialog = false
-                                    onSignOut()
+                                    SessionManager.logout(context)
+                                    navController.navigate("login") {
+                                        popUpTo(0) { inclusive = true }
+                                        launchSingleTop = true
+                                    }
                                 },
                             contentAlignment = Alignment.Center
                         ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    Icons.AutoMirrored.Outlined.Logout,
-                                    null,
-                                    tint = Color.White,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(Modifier.width(6.dp))
-                                Text(
-                                    "Sign Out",
-                                    fontFamily = PlusJakartaSans,
-                                    fontWeight = FontWeight.SemiBold,
-                                    fontSize = 14.sp,
-                                    color = Color.White
-                                )
-                            }
+                            Text(
+                                text = "Sign Out",
+                                fontFamily = PlusJakartaSans,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 14.sp,
+                                color = Color.White
+                            )
                         }
                     }
                 }

@@ -99,11 +99,27 @@ data class AdminRegisterResponse(
     @SerializedName("message") val message: String?
 )
 
+data class GenerateEnrollmentTokenRequest(
+    @SerializedName("employeeId") val employeeId: String,
+    @SerializedName("type") val type: String
+)
+
+data class GenerateEnrollmentTokenResponse(
+    @SerializedName("token") val token: String,
+    @SerializedName("employeeId") val employeeId: String?,
+    @SerializedName("expiresAt") val expiresAt: String?
+)
+
 // ══════════════════════════════════════
 // RETROFIT API INTERFACE
 // ══════════════════════════════════════
 
 interface EnrollmentApiService {
+
+    @POST("api/enrollment/generate")
+    suspend fun generateEnrollmentToken(
+        @Body request: GenerateEnrollmentTokenRequest
+    ): Response<GenerateEnrollmentTokenResponse>
 
     @POST("api/enroll")
     suspend fun enrollDevice(@Body request: EnrollRequest): Response<EnrollResponse>

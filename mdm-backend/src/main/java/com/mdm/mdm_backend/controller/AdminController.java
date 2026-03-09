@@ -9,7 +9,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
@@ -21,7 +21,7 @@ import java.util.Map;
 public class AdminController {
 
     private final AdminRepository adminRepository;
-    private final BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
+    private final PasswordEncoder passwordEncoder;  // Inject from Spring
 
     @PostMapping("/register")
     public ResponseEntity<?> register(@Valid @RequestBody AdminRegisterRequest request) {

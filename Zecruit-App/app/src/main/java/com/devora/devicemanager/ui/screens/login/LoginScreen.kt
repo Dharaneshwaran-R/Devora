@@ -392,15 +392,16 @@ fun LoginScreen(
                                     isLoading = true
                                     scope.launch {
                                         try {
+                                            val normalizedEmail = email.trim().lowercase()
                                             val response = RetrofitClient.api.loginAdmin(
                                                 AdminLoginRequest(
-                                                    email = email.trim(),
+                                                    email = normalizedEmail,
                                                     password = password
                                                 )
                                             )
                                             if (response.isSuccessful && response.body()?.success == true) {
                                                 val adminName = response.body()?.name ?: ""
-                                                SessionManager.saveSession(context, adminName, email.trim())
+                                                SessionManager.saveSession(context, adminName, normalizedEmail)
                                                 onLoginSuccess()
                                             } else {
                                                 val msg = response.body()?.message ?: "Invalid credentials"
