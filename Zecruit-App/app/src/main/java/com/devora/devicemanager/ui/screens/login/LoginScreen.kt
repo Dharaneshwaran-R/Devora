@@ -32,7 +32,7 @@ import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Divider
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Scaffold
@@ -187,7 +187,7 @@ fun LoginScreen(
                         Spacer(modifier = Modifier.height(20.dp))
 
                         // 4. Divider
-                        Divider(
+                        HorizontalDivider(
                             modifier = Modifier.fillMaxWidth(),
                             thickness = 1.dp,
                             color = PurpleCore.copy(alpha = 0.15f)

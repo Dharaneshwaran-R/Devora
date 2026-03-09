@@ -26,6 +26,8 @@ import com.devora.devicemanager.ui.screens.login.LoginScreen
 import com.devora.devicemanager.ui.screens.settings.SettingsScreen
 import com.devora.devicemanager.ui.screens.splash.SplashScreen
 import com.devora.devicemanager.ui.screens.register.AdminRegisterScreen
+import com.devora.devicemanager.ui.screens.reports.ViewReportsScreen
+import com.devora.devicemanager.ui.screens.policies.PoliciesScreen
 import com.devora.devicemanager.ui.viewmodel.AuthViewModel
 
 @Composable
@@ -233,6 +235,26 @@ fun AppNavigation(
                 },
                 isDark = isDark,
                 onThemeToggle = onThemeToggle
+            )
+        }
+
+        // ═══════════════════════════════════
+        // REPORTS & POLICIES
+        // ═══════════════════════════════════
+
+        // View Reports Screen
+        composable("view_reports") {
+            ViewReportsScreen(
+                onBack = { navController.popBackStack() },
+                isDark = isDark
+            )
+        }
+
+        // Policies Screen
+        composable("policies") {
+            PoliciesScreen(
+                onBack = { navController.popBackStack() },
+                isDark = isDark
             )
         }
     }

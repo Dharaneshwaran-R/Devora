@@ -350,8 +350,8 @@ fun DashboardScreen(
                     QuickAction("Device\nInfo", Icons.Filled.Devices, PurpleBright, "device_info"),
                     QuickAction("Lock\nAll", Icons.Outlined.Lock, WarningColor, ""),
                     QuickAction("Sync\nAll", Icons.Outlined.Sync, Success, ""),
-                    QuickAction("View\nReports", Icons.Outlined.Assessment, PurpleBright, ""),
-                    QuickAction("Policies", Icons.Outlined.Security, PurpleDeep, "")
+                    QuickAction("View\nReports", Icons.Outlined.Assessment, PurpleBright, "view_reports"),
+                    QuickAction("Policies", Icons.Outlined.Security, PurpleDeep, "policies")
                 )
 
                 LazyRow(
