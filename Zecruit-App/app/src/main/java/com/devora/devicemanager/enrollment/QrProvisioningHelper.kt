@@ -151,7 +151,7 @@ object QrProvisioningHelper {
      * @param size   QR bitmap dimension in pixels
      */
     fun generateEnrollmentTokenQr(token: String, size: Int = 512): Bitmap? {
-        val payload = Gson().toJson(mapOf("enrollment_token" to token))
+        val payload = token.trim().uppercase() // Send raw token string for robustness
         return generateQrBitmap(payload, size)
     }
 
@@ -162,17 +162,23 @@ object QrProvisioningHelper {
      * @return enrollment token if found, null otherwise
      */
     fun parseEnrollmentQr(qrContent: String): String? {
+        val normalizedContent = qrContent.trim().uppercase()
+        
+        // Strategy 1: Look for raw token string directly (DEV-XXXX-XXXX-XXXX)
+        val tokenRegex = Regex("DEV-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}")
+        tokenRegex.find(normalizedContent)?.value?.let { return it }
+
+        // Strategy 2: Look for JSON format
         return try {
             val map = Gson().fromJson(qrContent, Map::class.java)
-            map["enrollment_token"] as? String
-                ?: map["com.devora.devicemanager.ENROLLMENT_TOKEN"] as? String
-        } catch (e: Exception) {
-            // If it's not JSON, treat the raw string as the token
-            if (qrContent.matches(Regex("DEV-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}"))) {
-                qrContent
-            } else {
-                null
+            val extracted = ((map["enrollment_token"] as? String)
+                ?: (map["com.devora.devicemanager.ENROLLMENT_TOKEN"] as? String))
+            
+            extracted?.trim()?.uppercase()?.let { 
+                if (tokenRegex.matches(it)) it else null
             }
+        } catch (e: Exception) {
+            null
         }
     }
 }

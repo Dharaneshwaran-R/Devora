@@ -81,6 +81,8 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -131,7 +133,7 @@ fun EmployeeEnrollmentScreen(
     val enrollmentState by enrollmentVm.uiState.collectAsState()
 
     var selectedTab by remember { mutableIntStateOf(0) }
-    var tokenInput by remember { mutableStateOf("") }
+    var tokenInput by remember { mutableStateOf(TextFieldValue("")) }
     // enrollStep is now driven by the ViewModel's stepIndex
     var enrollStep by remember { mutableIntStateOf(-1) }
     var showHowTo by remember { mutableStateOf(false) }
@@ -139,11 +141,13 @@ fun EmployeeEnrollmentScreen(
     val snackbarHostState = remember { SnackbarHostState() }
 
     fun formatToken(input: String): String {
-        val clean = input.replace("-", "")
-            .filter { it.isLetterOrDigit() }
-            .uppercase()
-            .take(16)
-        return clean.chunked(4).joinToString("-")
+        val raw = input.uppercase().filter { it.isLetterOrDigit() }
+        if (raw.isEmpty()) return ""
+        // Still typing the DEV prefix
+        if (raw.length <= 3) return raw.take(3)
+        // DEV + up to 12 body chars (3 groups of 4)
+        val body = raw.substring(3).take(12)
+        return "DEV-" + body.chunked(4).joinToString("-")
     }
 
     // Sync the ViewModel's step index to the local enrollStep for unchanged UI rendering
@@ -157,8 +161,8 @@ fun EmployeeEnrollmentScreen(
     }
 
     fun startEnrollment() {
-        if (tokenInput.isNotEmpty()) {
-            enrollmentVm.onTokenChanged(tokenInput)
+        if (tokenInput.text.isNotEmpty()) {
+            enrollmentVm.onTokenChanged(tokenInput.text)
             enrollmentVm.enrollWithToken()
         } else {
             enrollmentVm.simulateQrScan()
@@ -389,9 +393,7 @@ fun EmployeeEnrollmentScreen(
                                                     ContextCompat.getMainExecutor(ctx),
                                                     QrCodeAnalyzer { qrValue ->
                                                         Log.d("QRScan", "Detected QR: $qrValue")
-                                                        // Feed detected token to ViewModel
-                                                        enrollmentVm.onTokenChanged(qrValue)
-                                                        enrollmentVm.enrollWithToken()
+                                                        enrollmentVm.enrollWithQrCode(qrValue)
                                                     }
                                                 )
                                             }
@@ -612,9 +614,14 @@ fun EmployeeEnrollmentScreen(
                     // Large token input
                     BasicTextField(
                         value = tokenInput,
-                        onValueChange = {
-                            tokenInput = formatToken(it)
-                            enrollmentVm.onTokenChanged(tokenInput)
+                        onValueChange = { value ->
+                            // Update selection to match formatted text length
+                            val formatted = formatToken(value.text)
+                            tokenInput = TextFieldValue(
+                                text = formatted,
+                                selection = TextRange(formatted.length)
+                            )
+                            enrollmentVm.onTokenChanged(formatted)
                         },
                         modifier = Modifier
                             .fillMaxWidth()
@@ -622,7 +629,7 @@ fun EmployeeEnrollmentScreen(
                             .background(DarkElevated)
                             .border(
                                 1.5.dp,
-                                if (tokenInput.isNotEmpty()) Purple else Color(0x357B61FF),
+                                if (tokenInput.text.isNotEmpty()) Purple else Color(0x357B61FF),
                                 RoundedCornerShape(12.dp)
                             )
                             .padding(20.dp),
@@ -643,7 +650,7 @@ fun EmployeeEnrollmentScreen(
                                 modifier = Modifier.fillMaxWidth(),
                                 contentAlignment = Alignment.Center
                             ) {
-                                if (tokenInput.isEmpty()) {
+                                if (tokenInput.text.isEmpty()) {
                                     Text(
                                         "DEV-XXXX-XXXX-XXXX",
                                         fontFamily = JetBrainsMono,
@@ -675,16 +682,16 @@ fun EmployeeEnrollmentScreen(
                     // Validate & Enroll button
                     Button(
                         onClick = {
-                            if (!tokenInput.startsWith("DEV-") || tokenInput.length != 19) {
+                            if (!tokenInput.text.startsWith("DEV-") || tokenInput.text.length != 18) {
                                 coroutineScope.launch {
                                     snackbarHostState.showSnackbar("Invalid token format")
                                 }
                                 return@Button
                             }
-                            enrollmentVm.onTokenChanged(tokenInput)
+                            enrollmentVm.onTokenChanged(tokenInput.text)
                             enrollmentVm.enrollWithToken()
                         },
-                        enabled = tokenInput.length == 19,
+                        enabled = tokenInput.text.length == 18,
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(52.dp),

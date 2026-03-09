@@ -21,6 +21,19 @@ public class EnrollmentController {
 
     private final EnrollmentService enrollmentService;
 
+    private String generateDevToken() {
+        String alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+        StringBuilder token = new StringBuilder("DEV");
+        for (int group = 0; group < 3; group++) {
+            token.append('-');
+            for (int i = 0; i < 4; i++) {
+                int index = (int) (Math.random() * alphabet.length());
+                token.append(alphabet.charAt(index));
+            }
+        }
+        return token.toString();
+    }
+
     @PostMapping("/enroll")
     public ResponseEntity<Device> enroll(@Valid @RequestBody EnrollRequest request) {
         Device device = enrollmentService.enrollDevice(request);
@@ -41,7 +54,7 @@ public class EnrollmentController {
 
     @PostMapping("/enrollment/generate")
     public ResponseEntity<Map<String, Object>> generateToken(@Valid @RequestBody EnrollmentRequest request) {
-        String token = UUID.randomUUID().toString();
+        String token = generateDevToken();
         // TODO: Persist generated token with employee and expiry in DB.
         return ResponseEntity.ok(Map.of(
                 "token", token,

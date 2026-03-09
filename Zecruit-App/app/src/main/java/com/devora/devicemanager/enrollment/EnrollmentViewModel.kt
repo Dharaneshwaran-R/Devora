@@ -55,10 +55,9 @@ class EnrollmentViewModel(application: Application) : AndroidViewModel(applicati
      * Updates the token input and validates format in real-time.
      */
     fun onTokenChanged(raw: String) {
-        val formatted = formatToken(raw)
         _uiState.value = _uiState.value.copy(
-            tokenInput = formatted,
-            tokenValid = repository.validateTokenFormat(formatted),
+            tokenInput = raw,
+            tokenValid = repository.validateTokenFormat(raw),
             errorMessage = null
         )
     }

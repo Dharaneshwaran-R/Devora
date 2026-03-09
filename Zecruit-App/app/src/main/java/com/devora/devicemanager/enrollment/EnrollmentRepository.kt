@@ -61,10 +61,9 @@ class EnrollmentRepository(
      * Validates token format: must match DEV-XXXX-XXXX-XXXX (16 alphanumeric characters).
      */
     fun validateTokenFormat(token: String): Boolean {
-        val clean = token.replace("-", "")
-        // Must start with DEV prefix and contain exactly 16 alphanumeric chars after prefix removal
-        return token.startsWith("DEV-") && token.length == 19 && clean.length == 16
-                && clean.all { it.isLetterOrDigit() }
+        // DEV-XXXX-XXXX-XXXX = 18 chars total (3 prefix + 3 dashes + 12 body)
+        return Regex("^DEV-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$")
+            .matches(token.trim().uppercase())
     }
 
     /**

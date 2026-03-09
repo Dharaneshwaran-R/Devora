@@ -101,8 +101,6 @@ import com.devora.devicemanager.ui.theme.TextMuted
 import com.devora.devicemanager.ui.theme.TextPrimary
 import com.devora.devicemanager.ui.theme.Warning
 import com.devora.devicemanager.enrollment.QrProvisioningHelper
-import com.devora.devicemanager.network.GenerateEnrollmentTokenRequest
-import com.devora.devicemanager.network.RetrofitClient
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -122,6 +120,18 @@ data class EnrollmentSession(
     val expiresAt: Long,
     val status: String
 )
+
+private fun generateEnrollmentToken(): String {
+    val alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+    val parts = (1..3).map {
+        buildString {
+            repeat(4) {
+                append(alphabet.random())
+            }
+        }
+    }
+    return "DEV-${parts.joinToString("-")}"
+}
 
 // ══════════════════════════════════════
 // SCREEN
@@ -331,19 +341,27 @@ fun AdminGenerateEnrollmentScreen(
                             coroutineScope.launch {
                                 isGenerating = true
                                 try {
-                                    val response = RetrofitClient.api.generateEnrollmentToken(
-                                        GenerateEnrollmentTokenRequest(
-                                            employeeId = assignedEmployee.trim(),
-                                            type = enrollType
+                                    val newToken = generateEnrollmentToken()
+                                    generatedToken = newToken
+                                    activeEnrollments.add(
+                                        0,
+                                        EnrollmentSession(
+                                            id = System.currentTimeMillis().toString(),
+                                            deviceLabel = deviceLabel.ifBlank {
+                                                "${selectedDeviceType.ifBlank { "Device" }}-${assignedEmployee.trim()}"
+                                            },
+                                            assignedEmployee = assignedEmployee.trim(),
+                                            department = selectedDepartment.ifBlank { "General" },
+                                            deviceType = selectedDeviceType.ifBlank { "Android" },
+                                            token = newToken,
+                                            validityHours = selectedValidity.removeSuffix("h").toIntOrNull() ?: 24,
+                                            createdAt = System.currentTimeMillis(),
+                                            expiresAt = System.currentTimeMillis() + ((selectedValidity.removeSuffix("h").toLongOrNull()
+                                                ?: 24L) * 60L * 60L * 1000L),
+                                            status = "PENDING"
                                         )
                                     )
-
-                                    if (response.isSuccessful && response.body()?.token != null) {
-                                        generatedToken = response.body()!!.token
-                                        screenState = "GENERATED"
-                                    } else {
-                                        snackbarHostState.showSnackbar("Failed to generate enrollment token")
-                                    }
+                                    screenState = "GENERATED"
                                 } catch (_: Exception) {
                                     snackbarHostState.showSnackbar("Failed to generate enrollment token")
                                 }
