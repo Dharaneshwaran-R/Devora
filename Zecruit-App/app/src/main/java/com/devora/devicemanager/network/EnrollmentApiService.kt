@@ -140,7 +140,7 @@ interface EnrollmentApiService {
 object RetrofitClient {
 
     // Default base URL — use the physical device LAN IP to reach the backend
-    private const val DEFAULT_BASE_URL = "http://10.181.122.214:8081/"
+    private const val DEFAULT_BASE_URL = "http://10.181.122.223:8080/"
 
     private val loggingInterceptor = HttpLoggingInterceptor().apply {
         level = HttpLoggingInterceptor.Level.BODY

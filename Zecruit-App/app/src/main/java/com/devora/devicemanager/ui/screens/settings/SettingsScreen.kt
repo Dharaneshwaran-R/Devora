@@ -133,7 +133,7 @@ fun SettingsScreen(
     var cameraDisable by remember { mutableStateOf(false) }
     var bgSync by remember { mutableStateOf(true) }
     var wifiOnly by remember { mutableStateOf(false) }
-    var serverUrl by remember { mutableStateOf("http://10.0.2.2:8081/") }
+    var serverUrl by remember { mutableStateOf("http://10.181.122.223:8080/") }
     var syncInterval by remember { mutableStateOf("15m") }
     var showSignOutDialog by remember { mutableStateOf(false) }
     var connectionStatus by remember { mutableStateOf<String?>(null) }

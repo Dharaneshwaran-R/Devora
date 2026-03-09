@@ -13,13 +13,14 @@ import java.util.concurrent.TimeUnit
  */
 object ApiConfig {
 
-    /** Emulator → host localhost */
-    const val EMULATOR_BASE_URL = "https://mdm-backend-server-production.up.railway.app/"
+    /** Emulator → host localhost (10.0.2.2 maps to host machine) */
+    const val EMULATOR_BASE_URL = "http://10.0.2.2:8080/"
 
-const val PHONE_BASE_URL = "https://mdm-backend-server-production.up.railway.app/"
+    /** Phone → use your laptop's WiFi IP */
+    const val PHONE_BASE_URL = "http://10.181.122.223:8080/"
 
     /** Active base URL — change this when switching between emulator and phone */
-    var BASE_URL: String = EMULATOR_BASE_URL
+    var BASE_URL: String = PHONE_BASE_URL
         private set
 
     private val loggingInterceptor = HttpLoggingInterceptor().apply {
