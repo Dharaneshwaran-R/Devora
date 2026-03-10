@@ -149,6 +149,25 @@ class EnrollmentViewModel(application: Application) : AndroidViewModel(applicati
      */
     fun getManagementStatus(): Map<String, Any> = policyHelper.getManagementStatus()
 
+    /**
+     * Deletes a device from the backend
+     * Removes all employee data and allows re-enrollment
+     */
+    fun deleteDevice(deviceId: String) {
+        viewModelScope.launch {
+            val result = repository.deleteDevice(deviceId)
+            if (result) {
+                // Device deleted successfully, reset enrollment state
+                resetEnrollment()
+            } else {
+                // Deletion failed
+                _uiState.value = _uiState.value.copy(
+                    errorMessage = "Failed to delete device. Please try again."
+                )
+            }
+        }
+    }
+
     // ─────────────────────────────────────
     // Private helpers
     // ─────────────────────────────────────

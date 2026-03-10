@@ -27,6 +27,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccessTime
@@ -36,17 +37,24 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -81,6 +89,7 @@ import com.devora.devicemanager.ui.theme.PurpleDeep
 import com.devora.devicemanager.ui.theme.Success
 import com.devora.devicemanager.ui.theme.TextMuted
 import com.devora.devicemanager.ui.theme.TextPrimary
+import kotlinx.coroutines.launch
 
 // ══════════════════════════════════════
 // DEVICE DATA (mapped from API)
@@ -115,6 +124,12 @@ fun DeviceListScreen(
     val bgColor = if (isDark) DarkBgBase else BgBase
     val textColor = if (isDark) DarkTextPrimary else TextPrimary
     val surfaceBg = if (isDark) DarkBgSurface else BgSurface
+
+    // ── Delete state ──
+    var showDeleteDialog by remember { mutableStateOf(false) }
+    var deleteTargetDevice by remember { mutableStateOf<Device?>(null) }
+    var isDeleting by remember { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
 
     // ── Live data state ──
     var isLoading by remember { mutableStateOf(true) }
@@ -514,12 +529,20 @@ fun DeviceListScreen(
                                             fontSize = 10.sp,
                                             color = TextMuted
                                         )
-                                        Icon(
-                                            imageVector = Icons.Filled.ChevronRight,
-                                            contentDescription = null,
-                                            tint = TextMuted,
-                                            modifier = Modifier.size(16.dp)
-                                        )
+                                        IconButton(
+                                            onClick = {
+                                                deleteTargetDevice = device
+                                                showDeleteDialog = true
+                                            },
+                                            modifier = Modifier.size(32.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.Outlined.DeleteOutline,
+                                                contentDescription = "Delete device",
+                                                tint = Danger.copy(alpha = 0.7f),
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -528,6 +551,86 @@ fun DeviceListScreen(
                 }
             }
         }
+    }
+
+    // ── DELETE DEVICE DIALOG ──
+    if (showDeleteDialog && deleteTargetDevice != null) {
+        val device = deleteTargetDevice!!
+        AlertDialog(
+            onDismissRequest = { 
+                if (!isDeleting) showDeleteDialog = false 
+            },
+            containerColor = if (isDark) Color(0xFF1A1A24) else Color.White,
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp),
+            title = {
+                Text(
+                    "Delete Device?",
+                    fontFamily = PlusJakartaSans,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp,
+                    color = textColor
+                )
+            },
+            text = {
+                Text(
+                    "This will permanently remove '${device.name}' and all associated employee data. You'll need to re-enroll from step 1.",
+                    fontFamily = DMSans,
+                    fontSize = 13.sp,
+                    color = TextMuted
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        isDeleting = true
+                        coroutineScope.launch {
+                            try {
+                                val response = RetrofitClient.api.deleteDevice(device.deviceId)
+                                if (response.isSuccessful) {
+                                    // Remove from UI
+                                    enrolledDevices = enrolledDevices.filter { it.deviceId != device.deviceId }
+                                    showDeleteDialog = false
+                                    Log.i("DeviceList", "Device ${device.name} deleted successfully")
+                                } else {
+                                    Log.e("DeviceList", "Delete failed: ${response.code()}")
+                                }
+                            } catch (e: Exception) {
+                                Log.e("DeviceList", "Delete error: ${e.message}")
+                            } finally {
+                                isDeleting = false
+                            }
+                        }
+                    },
+                    enabled = !isDeleting,
+                    colors = ButtonDefaults.buttonColors(containerColor = Danger),
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp)
+                ) {
+                    if (isDeleting) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            color = Color.White,
+                            strokeWidth = 1.5.dp
+                        )
+                    } else {
+                        Text(
+                            "Delete Permanently",
+                            fontFamily = PlusJakartaSans,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 14.sp,
+                            color = Color.White
+                        )
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showDeleteDialog = false },
+                    enabled = !isDeleting
+                ) {
+                    Text("Cancel", fontFamily = DMSans, fontSize = 14.sp, color = PurpleCore)
+                }
+            }
+        )
     }
 }
 

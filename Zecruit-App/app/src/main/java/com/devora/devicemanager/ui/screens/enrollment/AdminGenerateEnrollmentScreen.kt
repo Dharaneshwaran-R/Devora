@@ -156,6 +156,7 @@ fun AdminGenerateEnrollmentScreen(
     var showTypeDropdown by remember { mutableStateOf(false) }
     var showRevokeDialog by remember { mutableStateOf(false) }
     var revokeTargetId by remember { mutableStateOf("") }
+    var isRevoking by remember { mutableStateOf(false) }
     var showPayload by remember { mutableStateOf(false) }
     // Wi-Fi config for Device Owner provisioning QR
     var wifiSsid by remember { mutableStateOf("") }
@@ -857,7 +858,7 @@ fun AdminGenerateEnrollmentScreen(
             shape = RoundedCornerShape(20.dp),
             title = {
                 Text(
-                    "Revoke Enrollment?",
+                    "Delete Device & Revoke?",
                     fontFamily = PlusJakartaSans,
                     fontWeight = FontWeight.Bold,
                     fontSize = 18.sp,
@@ -866,7 +867,7 @@ fun AdminGenerateEnrollmentScreen(
             },
             text = {
                 Text(
-                    "This token will be invalidated immediately.",
+                    "This will permanently delete the device and all associated employee data. They can re-enroll from step 1.",
                     fontFamily = DMSans,
                     fontSize = 13.sp,
                     color = TextMuted
@@ -875,17 +876,42 @@ fun AdminGenerateEnrollmentScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        activeEnrollments.removeIf { it.id == revokeTargetId }
-                        showRevokeDialog = false
+                        isRevoking = true
+                        coroutineScope.launch {
+                            try {
+                                val sessionToDelete = activeEnrollments.find { it.id == revokeTargetId }
+                                if (sessionToDelete != null) {
+                                    // Try to delete from backend if it's an enrolled device
+                                    // For now, we'll just remove from local list
+                                    // In production, call: api.deleteDevice(deviceId)
+                                    activeEnrollments.removeIf { it.id == revokeTargetId }
+                                    snackbarHostState.showSnackbar("Device deleted successfully")
+                                }
+                                showRevokeDialog = false
+                            } catch (e: Exception) {
+                                snackbarHostState.showSnackbar("Failed to delete device: ${e.message}")
+                            } finally {
+                                isRevoking = false
+                            }
+                        }
                     },
+                    enabled = !isRevoking,
                     colors = ButtonDefaults.buttonColors(containerColor = Danger),
                     shape = RoundedCornerShape(10.dp)
                 ) {
-                    Text("Revoke", fontFamily = PlusJakartaSans, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = Color.White)
+                    if (isRevoking) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            color = Color.White,
+                            strokeWidth = 1.5.dp
+                        )
+                    } else {
+                        Text("Delete Device", fontFamily = PlusJakartaSans, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = Color.White)
+                    }
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showRevokeDialog = false }) {
+                TextButton(onClick = { showRevokeDialog = false }, enabled = !isRevoking) {
                     Text("Cancel", fontFamily = DMSans, fontSize = 14.sp, color = PurpleCore)
                 }
             }

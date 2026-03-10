@@ -5,6 +5,7 @@ import retrofit2.Response
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.Body
+import retrofit2.http.DELETE
 import retrofit2.http.GET
 import retrofit2.http.POST
 import retrofit2.http.Path
@@ -83,6 +84,11 @@ data class TokenValidationResponse(
     @SerializedName("message") val message: String?
 )
 
+data class DeleteDeviceResponse(
+    @SerializedName("message") val message: String?,
+    @SerializedName("deviceId") val deviceId: String?
+)
+
 data class AdminRegisterRequest(
     @SerializedName("name") val name: String,
     @SerializedName("email") val email: String,
@@ -153,6 +159,9 @@ interface EnrollmentApiService {
 
     @POST("api/admin/login")
     suspend fun loginAdmin(@Body request: AdminLoginRequest): Response<AdminLoginResponse>
+
+    @DELETE("api/devices/{deviceId}")
+    suspend fun deleteDevice(@Path("deviceId") deviceId: String): Response<DeleteDeviceResponse>
 }
 
 // ══════════════════════════════════════

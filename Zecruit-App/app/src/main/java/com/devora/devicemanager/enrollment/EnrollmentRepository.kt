@@ -211,6 +211,33 @@ class EnrollmentRepository(
             .edit().clear().apply()
     }
 
+    /**
+     * Deletes a device from the backend
+     * Removes all associated employee data and enrollment tokens
+     * Device must re-enroll from step 1
+     */
+    suspend fun deleteDevice(deviceId: String): Boolean {
+        return try {
+            val response = api.deleteDevice(deviceId)
+            if (response.isSuccessful) {
+                Log.i(TAG, "Device deleted successfully: $deviceId")
+                // If this is the current device, clear enrollment state
+                val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                val storedDeviceId = prefs.getString("device_id", null)
+                if (storedDeviceId == deviceId) {
+                    clearEnrollmentState()
+                }
+                true
+            } else {
+                Log.e(TAG, "Failed to delete device: ${response.code()} — ${response.errorBody()?.string()}")
+                false
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Device deletion failed with exception", e)
+            false
+        }
+    }
+
     private fun persistEnrollmentState(deviceId: String, token: String, method: String) {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .edit()

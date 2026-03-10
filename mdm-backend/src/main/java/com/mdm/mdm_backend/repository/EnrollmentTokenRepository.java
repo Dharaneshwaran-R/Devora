@@ -17,4 +17,6 @@ public interface EnrollmentTokenRepository extends JpaRepository<EnrollmentToken
     List<EnrollmentToken> findByExpiresAtBefore(LocalDateTime dateTime);
 
     Optional<EnrollmentToken> findByTokenAndStatus(String token, String status);
+
+    List<EnrollmentToken> findByDeviceId(String deviceId);
 }

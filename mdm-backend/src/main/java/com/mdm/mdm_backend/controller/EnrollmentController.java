@@ -100,4 +100,25 @@ public class EnrollmentController {
                 "status", "PENDING"
         ));
     }
+
+    /**
+     * Delete a device by deviceId
+     * Removes device and all associated data (tokens, device info, app inventory)
+     * Employee must re-enroll from step 1
+     */
+    @DeleteMapping("/devices/{deviceId}")
+    public ResponseEntity<Map<String, String>> deleteDevice(@PathVariable String deviceId) {
+        boolean deleted = enrollmentService.deleteDevice(deviceId);
+        if (deleted) {
+            return ResponseEntity.ok(Map.of(
+                    "message", "Device deleted successfully",
+                    "deviceId", deviceId
+            ));
+        } else {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of(
+                    "message", "Device not found",
+                    "deviceId", deviceId
+            ));
+        }
+    }
 }

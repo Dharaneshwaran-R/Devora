@@ -144,4 +144,30 @@ public class EnrollmentService {
     public long countByStatus(String status) {
         return deviceRepository.countByStatus(status);
     }
+
+    // ════════════════════════════════════════
+    // DEVICE DELETION
+    // ════════════════════════════════════════
+
+    public boolean deleteDevice(String deviceId) {
+        Optional<Device> device = deviceRepository.findByDeviceId(deviceId);
+        if (device.isPresent()) {
+            Device d = device.get();
+            
+            // Delete all associated enrollment tokens for this device
+            List<EnrollmentToken> tokensForDevice = enrollmentTokenRepository.findByDeviceId(deviceId);
+            if (!tokensForDevice.isEmpty()) {
+                enrollmentTokenRepository.deleteAll(tokensForDevice);
+                log.info("Deleted {} enrollment tokens for device: {}", tokensForDevice.size(), deviceId);
+            }
+            
+            // Delete the device
+            deviceRepository.delete(d);
+            log.info("Deleted device: {} for employee: {}", deviceId, d.getEmployeeName());
+            
+            return true;
+        }
+        log.warn("Device not found for deletion: {}", deviceId);
+        return false;
+    }
 }
