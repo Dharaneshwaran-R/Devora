@@ -23,4 +23,12 @@ public class Device {
     private LocalDateTime enrolledAt;
 
     private String status;
+
+    // Employee Information
+    private String employeeId;
+    private String employeeName;
+
+    // Device Information
+    private String deviceModel;
+    private String manufacturer;
 }

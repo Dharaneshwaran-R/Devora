@@ -145,6 +145,7 @@ fun AdminGenerateEnrollmentScreen(
     var screenState by remember { mutableStateOf("FORM") }
     var deviceLabel by remember { mutableStateOf("") }
     var assignedEmployee by remember { mutableStateOf("") }
+    var employeeName by remember { mutableStateOf("") }
     var selectedDepartment by remember { mutableStateOf("") }
     var selectedDeviceType by remember { mutableStateOf("") }
     var selectedValidity by remember { mutableStateOf("24h") }
@@ -232,6 +233,7 @@ fun AdminGenerateEnrollmentScreen(
                             screenState = "FORM"
                             deviceLabel = ""
                             assignedEmployee = ""
+                            employeeName = ""
                             selectedDepartment = ""
                             selectedDeviceType = ""
                             generatedToken = ""
@@ -282,7 +284,28 @@ fun AdminGenerateEnrollmentScreen(
 
                             Spacer(Modifier.height(12.dp))
 
-                            // Enrollment Type
+                            // Employee Name
+                            Text("Employee Name", fontFamily = DMSans, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = PurpleCore)
+                            Spacer(Modifier.height(6.dp))
+                            BasicTextField(
+                                value = employeeName,
+                                onValueChange = { employeeName = it },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(inputBg)
+                                    .padding(14.dp),
+                                textStyle = TextStyle(fontFamily = DMSans, fontSize = 14.sp, color = textColor),
+                                singleLine = true,
+                                decorationBox = { inner ->
+                                    if (employeeName.isEmpty()) {
+                                        Text("Enter Employee Name", fontFamily = DMSans, fontSize = 14.sp, color = TextMuted)
+                                    }
+                                    inner()
+                                }
+                            )
+
+                            Spacer(Modifier.height(12.dp))
                             Text("Enrollment Type", fontFamily = DMSans, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = PurpleCore)
                             Spacer(Modifier.height(8.dp))
                             listOf(
@@ -338,6 +361,12 @@ fun AdminGenerateEnrollmentScreen(
                                 }
                                 return@Button
                             }
+                            if (employeeName.isBlank()) {
+                                coroutineScope.launch {
+                                    snackbarHostState.showSnackbar("Please enter Employee Name")
+                                }
+                                return@Button
+                            }
                             coroutineScope.launch {
                                 isGenerating = true
                                 try {
@@ -348,9 +377,9 @@ fun AdminGenerateEnrollmentScreen(
                                         EnrollmentSession(
                                             id = System.currentTimeMillis().toString(),
                                             deviceLabel = deviceLabel.ifBlank {
-                                                "${selectedDeviceType.ifBlank { "Device" }}-${assignedEmployee.trim()}"
+                                                "${selectedDeviceType.ifBlank { "Device" }}-${employeeName.trim()}"
                                             },
-                                            assignedEmployee = assignedEmployee.trim(),
+                                            assignedEmployee = employeeName.trim(),
                                             department = selectedDepartment.ifBlank { "General" },
                                             deviceType = selectedDeviceType.ifBlank { "Android" },
                                             token = newToken,

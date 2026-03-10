@@ -35,6 +35,8 @@ data class EnrollmentResult(
     val enrolledAt: String?,
     val status: String?,
     val method: String?,
+    val employeeName: String? = null,
+    val employeeId: String? = null,
     val errorMessage: String? = null
 )
 
@@ -167,7 +169,9 @@ class EnrollmentRepository(
                 deviceId = deviceId,
                 enrolledAt = enrollData?.enrolledAt,
                 status = enrollData?.status ?: "ENROLLED",
-                method = method
+                method = method,
+                employeeName = enrollData?.employeeName,
+                employeeId = enrollData?.employeeId
             )
 
         } catch (e: Exception) {

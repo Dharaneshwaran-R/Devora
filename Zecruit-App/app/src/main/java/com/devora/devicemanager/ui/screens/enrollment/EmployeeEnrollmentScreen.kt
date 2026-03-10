@@ -972,13 +972,22 @@ fun EmployeeEnrollmentScreen(
                                 SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault())
                             }
 
-                            listOf(
-                                "Device" to Build.MODEL,
-                                "Manufacturer" to Build.MANUFACTURER,
-                                "Enrolled" to dateFormat.format(Date()),
-                                "Server" to "Connected ✓",
-                                "Policy" to "Enterprise Standard"
-                            ).forEach { (label, value) ->
+                            // Build the enrollment details list, including employee info if available
+                            val enrollmentDetails = buildList {
+                                if (!enrollmentState.employeeName.isNullOrEmpty()) {
+                                    add("Employee Name" to enrollmentState.employeeName!!)
+                                }
+                                if (!enrollmentState.employeeId.isNullOrEmpty()) {
+                                    add("Employee ID" to enrollmentState.employeeId!!)
+                                }
+                                add("Device" to Build.MODEL)
+                                add("Manufacturer" to Build.MANUFACTURER)
+                                add("Enrolled" to dateFormat.format(Date()))
+                                add("Server" to "Connected ✓")
+                                add("Policy" to "Enterprise Standard")
+                            }
+
+                            enrollmentDetails.forEach { (label, value) ->
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()

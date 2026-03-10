@@ -28,7 +28,9 @@ data class EnrollResponse(
     @SerializedName("enrollmentToken") val enrollmentToken: String?,
     @SerializedName("enrollmentMethod") val enrollmentMethod: String?,
     @SerializedName("enrolledAt") val enrolledAt: String?,
-    @SerializedName("status") val status: String?
+    @SerializedName("status") val status: String?,
+    @SerializedName("employeeId") val employeeId: String? = null,
+    @SerializedName("employeeName") val employeeName: String? = null
 )
 
 data class DeviceInfoRequest(
@@ -64,7 +66,11 @@ data class DeviceResponse(
     @SerializedName("enrollmentToken") val enrollmentToken: String?,
     @SerializedName("enrollmentMethod") val enrollmentMethod: String,
     @SerializedName("enrolledAt") val enrolledAt: String,
-    @SerializedName("status") val status: String
+    @SerializedName("status") val status: String,
+    @SerializedName("employeeId") val employeeId: String? = null,
+    @SerializedName("employeeName") val employeeName: String? = null,
+    @SerializedName("deviceModel") val deviceModel: String? = null,
+    @SerializedName("manufacturer") val manufacturer: String? = null
 )
 
 data class TokenValidationRequest(

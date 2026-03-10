@@ -21,7 +21,9 @@ data class EnrollmentUiState(
     val isDeviceOwner: Boolean = false,
     val stepIndex: Int = -1, // -1 = pre-enrollment, 0-4 = in-progress, 5 = success
     val qrBitmap: Bitmap? = null,
-    val provisioningPayload: String? = null
+    val provisioningPayload: String? = null,
+    val employeeName: String? = null,
+    val employeeId: String? = null
 )
 
 /**
@@ -198,7 +200,9 @@ class EnrollmentViewModel(application: Application) : AndroidViewModel(applicati
                     status = EnrollmentStatus.SUCCESS,
                     enrollmentResult = result,
                     stepIndex = 5,
-                    isDeviceOwner = policyHelper.isDeviceOwner
+                    isDeviceOwner = policyHelper.isDeviceOwner,
+                    employeeName = result.employeeName,
+                    employeeId = result.employeeId
                 )
             }
         }

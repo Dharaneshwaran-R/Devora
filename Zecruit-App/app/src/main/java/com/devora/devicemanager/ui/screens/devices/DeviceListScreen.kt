@@ -153,8 +153,7 @@ fun DeviceListScreen(
     val filteredDevices = enrolledDevices.filter { device ->
         val matchesSearch = device.name.contains(searchQuery, ignoreCase = true) ||
                 device.manufacturer.contains(searchQuery, ignoreCase = true) ||
-                device.model.contains(searchQuery, ignoreCase = true) ||
-                device.deviceId.contains(searchQuery, ignoreCase = true)
+                device.model.contains(searchQuery, ignoreCase = true)
         val matchesFilter = when (selectedFilter) {
             "ALL" -> true
             "ONLINE" -> device.status == "ONLINE"
@@ -267,7 +266,7 @@ fun DeviceListScreen(
                     Box(modifier = Modifier.weight(1f)) {
                         if (searchQuery.isEmpty()) {
                             Text(
-                                text = "Search by device ID or model...",
+                                text = "Search by employee name or model...",
                                 fontFamily = DMSans,
                                 fontSize = 13.sp,
                                 color = TextMuted
@@ -542,14 +541,29 @@ private fun DeviceResponse.toDevice(): Device {
         else -> "OFFLINE"
     }
     val enrolledStr = enrolledAt.take(10)
+    
+    // Use employee name or fallback to device model
+    val displayName = if (!employeeName.isNullOrEmpty()) employeeName!! else (deviceModel ?: "Unknown")
+    val firstLetter = displayName.take(1).uppercase()
+    
+    // Build device info for subtitle
+    val deviceInfo = buildString {
+        if (!deviceModel.isNullOrEmpty()) {
+            append(deviceModel)
+        }
+        if (!manufacturer.isNullOrEmpty()) {
+            if (isNotEmpty()) append(" · ")
+            append(manufacturer)
+        }
+    }
 
     return Device(
-        name = deviceId.take(12).let { if (it.length > 8) "${it.take(8)}..." else it },
-        manufacturer = enrollmentMethod,
-        model = "Enrolled: $enrolledStr",
+        name = displayName,
+        manufacturer = deviceInfo.ifEmpty { "Unknown Device" },
+        model = "QR Code",
         status = statusStr,
         api = "ID: ${deviceId.take(8)}",
-        initial = deviceId.take(1).uppercase(),
+        initial = firstLetter,
         deviceId = deviceId,
         lastSeen = "Enrolled $enrolledStr"
     )
