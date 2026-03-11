@@ -1,8 +1,6 @@
 package com.mdm.mdm_backend.controller;
 
 import com.mdm.mdm_backend.model.dto.DeviceResponse;
-import com.mdm.mdm_backend.model.entity.Device;
-import com.mdm.mdm_backend.repository.DeviceRepository;
 import com.mdm.mdm_backend.service.EnrollmentService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -11,11 +9,9 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 
@@ -26,7 +22,6 @@ import java.util.Map;
 public class DeviceController {
 
     private final EnrollmentService enrollmentService;
-    private final DeviceRepository deviceRepository;
 
     @GetMapping("/devices")
     public ResponseEntity<List<DeviceResponse>> getAllDevices() {
@@ -63,27 +58,5 @@ public class DeviceController {
                 .filter(device -> "ACTIVE".equalsIgnoreCase(device.getStatus()))
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.status(HttpStatus.NOT_FOUND).build());
-    }
-
-    /**
-     * Called by the enrolled device every 15 minutes via SyncWorker.
-     * Updates lastHeartbeat to now and ensures status is ACTIVE.
-     * When the MDM app is uninstalled, this stops being called and the
-     * DeviceStatusScheduler will eventually mark the device as INACTIVE.
-     */
-    @PostMapping("/devices/{deviceId}/heartbeat")
-    public ResponseEntity<Map<String, String>> heartbeat(@PathVariable String deviceId) {
-        return deviceRepository.findByDeviceId(deviceId)
-                .map(device -> {
-                    device.setLastHeartbeat(LocalDateTime.now());
-                    if (!"ACTIVE".equalsIgnoreCase(device.getStatus())) {
-                        device.setStatus("ACTIVE");
-                        log.info("Device {} came back online, marked ACTIVE", deviceId);
-                    }
-                    deviceRepository.save(device);
-                    return ResponseEntity.ok(Map.of("status", "ok"));
-                })
-                .orElse(ResponseEntity.status(HttpStatus.NOT_FOUND)
-                        .body(Map.of("message", "Device not found")));
     }
 }

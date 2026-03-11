@@ -77,16 +77,6 @@ data class NewAppNotification(
     @SerializedName("action") val action: String // "INSTALLED" or "UPDATED"
 )
 
-data class AdminNotification(
-    @SerializedName("id") val id: Long,
-    @SerializedName("deviceId") val deviceId: String,
-    @SerializedName("type") val type: String,
-    @SerializedName("title") val title: String,
-    @SerializedName("message") val message: String?,
-    @SerializedName("read") val read: Boolean,
-    @SerializedName("createdAt") val createdAt: String?
-)
-
 data class DashboardStats(
     @SerializedName("totalDevices") val totalDevices: Int,
     @SerializedName("activeDevices") val activeDevices: Int,
@@ -205,9 +195,6 @@ interface EnrollmentApiService {
     @POST("api/app-inventory/notify")
     suspend fun notifyNewApp(@Body notification: NewAppNotification): Response<Unit>
 
-    @GET("api/notifications")
-    suspend fun getNotifications(): Response<List<AdminNotification>>
-
     @GET("api/dashboard/stats")
     suspend fun getDashboardStats(): Response<DashboardStats>
 
@@ -222,9 +209,6 @@ interface EnrollmentApiService {
 
     @GET("api/devices/check/{deviceId}")
     suspend fun checkDevice(@Path("deviceId") deviceId: String): Response<DeviceResponse>
-
-    @POST("api/devices/{deviceId}/heartbeat")
-    suspend fun sendHeartbeat(@Path("deviceId") deviceId: String): Response<Unit>
 
     @GET("api/enrollment/active")
     suspend fun getActiveEnrollments(): Response<List<EnrollmentTokenResponse>>

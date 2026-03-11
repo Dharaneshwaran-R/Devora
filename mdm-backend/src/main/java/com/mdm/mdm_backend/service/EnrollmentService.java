@@ -119,7 +119,6 @@ public class EnrollmentService {
                 .employeeId(employeeId)
                 .enrolledAt(LocalDateTime.now())
                 .status("ACTIVE")
-                .lastHeartbeat(LocalDateTime.now())
                 .build();
 
         log.info("Enrolling new device: {} for employee: {}", request.getDeviceId(), employeeName);

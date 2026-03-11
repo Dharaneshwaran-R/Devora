@@ -14,7 +14,6 @@ import androidx.work.NetworkType
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
-import com.devora.devicemanager.network.RetrofitClient
 import java.util.concurrent.TimeUnit
 
 /**
@@ -92,19 +91,6 @@ class SyncWorker(
                 prefs.edit()
                     .putLong("last_sync_timestamp", System.currentTimeMillis())
                     .apply()
-
-                // Send heartbeat so backend knows the MDM app is still installed/active.
-                // If the app is uninstalled, this call stops and the backend scheduler
-                // will mark the device INACTIVE after 30 minutes of no heartbeat.
-                val deviceId = prefs.getString("device_id", null)
-                if (deviceId != null) {
-                    try {
-                        RetrofitClient.api.sendHeartbeat(deviceId)
-                        Log.d(TAG, "Heartbeat sent for device $deviceId")
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Heartbeat failed (non-critical): ${e.message}")
-                    }
-                }
 
                 Result.success()
             } else {
