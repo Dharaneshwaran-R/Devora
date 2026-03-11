@@ -31,7 +31,7 @@ class HeartbeatService : Service() {
         private const val TAG = "HeartbeatService"
         private const val CHANNEL_ID = "devora_heartbeat_channel"
         private const val NOTIFICATION_ID = 2001
-        private const val HEARTBEAT_INTERVAL_MS = 60_000L // 60 seconds
+        private const val HEARTBEAT_INTERVAL_MS = 30_000L // 30 seconds
 
         fun start(context: Context) {
             val intent = Intent(context, HeartbeatService::class.java)

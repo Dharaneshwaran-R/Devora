@@ -80,9 +80,7 @@ import com.devora.devicemanager.ui.theme.Success
 import com.devora.devicemanager.ui.theme.TextMuted
 import com.devora.devicemanager.ui.theme.TextPrimary
 import com.devora.devicemanager.ui.theme.DarkTextPrimary
-import com.devora.devicemanager.network.AdminNotification
 import com.devora.devicemanager.ui.theme.Warning as WarningColor
-import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -109,22 +107,7 @@ private data class Activity(
     val color: Color
 )
 
-private fun formatTimeAgo(isoDateTime: String?): String {
-    if (isoDateTime == null) return "just now"
-    return try {
-        val truncated = isoDateTime.substringBefore('.')
-        val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.getDefault())
-        sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
-        val date = sdf.parse(truncated) ?: return "just now"
-        val diff = (System.currentTimeMillis() - date.time) / 1000
-        when {
-            diff < 60    -> "${diff}s ago"
-            diff < 3600  -> "${diff / 60}m ago"
-            diff < 86400 -> "${diff / 3600}h ago"
-            else         -> "${diff / 86400}d ago"
-        }
-    } catch (e: Exception) { "just now" }
-}
+private val recentActivities = emptyList<Activity>()
 
 // ══════════════════════════════════════
 // DASHBOARD SCREEN
@@ -142,25 +125,6 @@ fun DashboardScreen(
         SimpleDateFormat("EEEE, MMMM d, yyyy", Locale.getDefault()).format(Date())
     }
     var dashboardStats by remember { mutableStateOf<DashboardStats?>(null) }
-    var notifications by remember { mutableStateOf<List<AdminNotification>>(emptyList()) }
-    var unreadCount by remember { mutableStateOf(0) }
-
-    // Poll backend every 10 seconds — new app installs show up within seconds
-    LaunchedEffect("notifications") {
-        while (true) {
-            try {
-                val resp = RetrofitClient.api.getNotifications()
-                if (resp.isSuccessful) {
-                    val list = resp.body() ?: emptyList()
-                    notifications = list.take(10)
-                    unreadCount = list.count { !it.read }
-                }
-            } catch (e: Exception) {
-                Log.e("DashboardScreen", "Failed to fetch notifications", e)
-            }
-            delay(10_000L)
-        }
-    }
 
     LaunchedEffect(Unit) {
         try {
@@ -246,23 +210,14 @@ fun DashboardScreen(
                                     tint = PurpleCore
                                 )
                             }
-                            if (unreadCount > 0) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(if (unreadCount > 9) 16.dp else 14.dp)
-                                        .background(Danger, CircleShape)
-                                        .align(Alignment.TopEnd),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = if (unreadCount > 9) "9+" else unreadCount.toString(),
-                                        fontFamily = JetBrainsMono,
-                                        fontSize = 7.sp,
-                                        color = Color.White,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                            }
+                            // Red dot badge
+                            Box(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .background(Danger, CircleShape)
+                                    .align(Alignment.TopEnd)
+                                    .padding(top = 8.dp, end = 8.dp)
+                            )
                         }
                     }
                 }
@@ -475,20 +430,7 @@ fun DashboardScreen(
             item {
                 Box(modifier = Modifier.padding(horizontal = 16.dp)) {
                     DevoraCard(isDark = isDark) {
-                        val activities = notifications.map { n ->
-                            Activity(
-                                description = n.message ?: n.title,
-                                device = n.title,
-                                time = formatTimeAgo(n.createdAt),
-                                color = when {
-                                    n.type.endsWith("INSTALLED") -> Success
-                                    n.type.endsWith("UPDATED")   -> WarningColor
-                                    n.type.endsWith("REMOVED")   -> Danger
-                                    else -> PurpleCore
-                                }
-                            )
-                        }
-                        if (activities.isEmpty()) {
+                        if (recentActivities.isEmpty()) {
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -514,7 +456,7 @@ fun DashboardScreen(
                             }
                         } else {
                             Column {
-                                activities.forEachIndexed { index, activity ->
+                                recentActivities.forEachIndexed { index, activity ->
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
@@ -552,7 +494,7 @@ fun DashboardScreen(
                                             color = TextMuted
                                         )
                                     }
-                                    if (index < activities.size - 1) {
+                                    if (index < recentActivities.size - 1) {
                                         HorizontalDivider(
                                             thickness = 1.dp,
                                             color = if (isDark) {
