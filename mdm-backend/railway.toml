@@ -1,0 +1,13 @@
+[build]
+builder = "nixpacks"
+
+[deploy]
+# Explicit start command with JVM memory flags tuned for Railway's 512MB container.
+# -XX:+UseContainerSupport  → JVM reads cgroup memory limits correctly
+# -XX:MaxRAMPercentage=70.0 → cap heap at 70% of container RAM (~358MB on 512MB)
+# -XX:+UseG1GC              → G1 collector has lower pause times and better memory footprint
+startCommand = "java -XX:+UseContainerSupport -XX:MaxRAMPercentage=70.0 -XX:+UseG1GC -jar target/*.jar"
+healthcheckPath = "/actuator/health"
+healthcheckTimeout = 120
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3
