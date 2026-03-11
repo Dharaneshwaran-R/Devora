@@ -25,6 +25,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.ArrowForward
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.Apps
 import androidx.compose.material.icons.outlined.Block
 import androidx.compose.material.icons.outlined.CameraAlt
@@ -68,12 +70,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.devora.devicemanager.network.AppInventoryItem
 import com.devora.devicemanager.network.DeviceResponse
 import com.devora.devicemanager.network.RetrofitClient
 import com.devora.devicemanager.ui.components.DevoraCard
 import com.devora.devicemanager.ui.components.SectionHeader
 import com.devora.devicemanager.ui.components.StatusBadge
 import com.devora.devicemanager.ui.theme.BgBase
+import com.devora.devicemanager.ui.theme.BgElevated
 import com.devora.devicemanager.ui.theme.BgSurface
 import com.devora.devicemanager.ui.theme.DMSans
 import com.devora.devicemanager.ui.theme.Danger
@@ -255,7 +259,7 @@ fun DeviceDetailScreen(
 
             when (selectedTab) {
                 0 -> InfoTab(device = device, deviceResponse = deviceResponse, isDark = isDark, textColor = textColor)
-                1 -> AppsTab(isDark = isDark, textColor = textColor)
+                1 -> AppsTab(deviceId = deviceId, isDark = isDark, textColor = textColor)
                 2 -> ActivityTab(isDark = isDark, textColor = textColor)
                 3 -> ActionsTab(
                     isDark = isDark,
@@ -743,37 +747,190 @@ private fun InfoTab(device: Device, deviceResponse: DeviceResponse?, isDark: Boo
 // ══════════════════════════════════════
 
 @Composable
-private fun AppsTab(isDark: Boolean, textColor: Color) {
-    data class AppInfo(
-        val name: String,
-        val packageName: String,
-        val status: String,
-        val statusColor: Color
-    )
+private fun AppsTab(deviceId: String, isDark: Boolean, textColor: Color) {
+    var apps by remember { mutableStateOf<List<AppInventoryItem>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(true) }
+    var errorMsg by remember { mutableStateOf<String?>(null) }
+    var searchQuery by remember { mutableStateOf("") }
+    var selectedFilter by remember { mutableStateOf("ALL") }
 
-    val apps = listOf(
-        AppInfo("Google Chrome", "com.android.chrome", "Allowed", Success),
-        AppInfo("Gmail", "com.google.android.gm", "Allowed", Success),
-        AppInfo("Slack", "com.slack", "Allowed", Success),
-        AppInfo("Microsoft Teams", "com.microsoft.teams", "Allowed", Success),
-        AppInfo("WhatsApp", "com.whatsapp", "Blocked", Danger),
-        AppInfo("Instagram", "com.instagram.android", "Blocked", Danger),
-        AppInfo("YouTube", "com.google.android.youtube", "Restricted", Warning),
-        AppInfo("Camera", "com.android.camera", "Allowed", Success)
-    )
+    val surfaceBg = if (isDark) DarkBgSurface else BgSurface
 
-    DevoraCard(accentColor = PurpleCore, isDark = isDark) {
+    LaunchedEffect(deviceId) {
+        isLoading = true
+        try {
+            val response = RetrofitClient.api.getAppInventory(deviceId)
+            if (response.isSuccessful) {
+                apps = response.body() ?: emptyList()
+                errorMsg = null
+            } else {
+                errorMsg = "Failed to load apps (${response.code()})"
+            }
+        } catch (e: Exception) {
+            errorMsg = "Failed to load apps. Check connection."
+            Log.e("AppsTab", "Error fetching apps: ${e.message}")
+        }
+        isLoading = false
+    }
+
+    if (isLoading) {
+        Box(
+            modifier = Modifier.fillMaxWidth().padding(32.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            CircularProgressIndicator(color = PurpleCore, modifier = Modifier.size(32.dp))
+        }
+        return
+    }
+
+    if (errorMsg != null) {
+        DevoraCard(accentColor = PurpleCore, isDark = isDark) {
+            Text(
+                errorMsg!!,
+                fontFamily = DMSans,
+                fontSize = 13.sp,
+                color = Danger,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().padding(24.dp)
+            )
+        }
+        return
+    }
+
+    val userApps = apps.filter { it.isSystemApp != true }
+    val systemApps = apps.filter { it.isSystemApp == true }
+
+    val filteredApps = apps.filter { app ->
+        val matchesSearch = app.appName.contains(searchQuery, ignoreCase = true) ||
+                app.packageName.contains(searchQuery, ignoreCase = true)
+        val matchesFilter = when (selectedFilter) {
+            "ALL" -> true
+            "USER" -> app.isSystemApp != true
+            "SYSTEM" -> app.isSystemApp == true
+            else -> true
+        }
+        matchesSearch && matchesFilter
+    }
+
+    Column {
+        // Summary header
         SectionHeader(title = "INSTALLED APPLICATIONS", isDark = isDark)
         Spacer(Modifier.height(4.dp))
         Text(
-            "${apps.size} apps · ${apps.count { it.status == "Allowed" }} allowed · ${apps.count { it.status == "Blocked" }} blocked",
+            "${apps.size} apps · ${userApps.size} user · ${systemApps.size} system",
             fontFamily = JetBrainsMono,
             fontSize = 10.sp,
             color = TextMuted
         )
-        Spacer(Modifier.height(8.dp))
 
-        apps.forEachIndexed { index, app ->
+        Spacer(Modifier.height(12.dp))
+
+        // Search bar
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(44.dp)
+                .background(surfaceBg, RoundedCornerShape(12.dp))
+                .border(1.dp, PurpleBorder, RoundedCornerShape(12.dp))
+                .padding(horizontal = 14.dp),
+            contentAlignment = Alignment.CenterStart
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Search,
+                    contentDescription = null,
+                    tint = PurpleCore,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Box(modifier = Modifier.weight(1f)) {
+                    if (searchQuery.isEmpty()) {
+                        Text(
+                            text = "Search apps...",
+                            fontFamily = DMSans,
+                            fontSize = 13.sp,
+                            color = TextMuted
+                        )
+                    }
+                    BasicTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        textStyle = TextStyle(
+                            fontFamily = DMSans,
+                            fontSize = 13.sp,
+                            color = textColor
+                        ),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+                if (searchQuery.isNotEmpty()) {
+                    Icon(
+                        imageVector = Icons.Filled.Close,
+                        contentDescription = "Clear search",
+                        tint = TextMuted,
+                        modifier = Modifier
+                            .size(18.dp)
+                            .clickable { searchQuery = "" }
+                    )
+                }
+            }
+        }
+
+        Spacer(Modifier.height(10.dp))
+
+        // Filter chips
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            val filters = listOf(
+                "ALL" to apps.size,
+                "USER" to userApps.size,
+                "SYSTEM" to systemApps.size
+            )
+            filters.forEach { (label, count) ->
+                val isSelected = selectedFilter == label
+                Box(
+                    modifier = Modifier
+                        .background(
+                            if (isSelected) PurpleCore.copy(alpha = 0.12f) else surfaceBg,
+                            RoundedCornerShape(20.dp)
+                        )
+                        .border(
+                            1.dp,
+                            if (isSelected) PurpleCore.copy(alpha = 0.40f) else PurpleCore.copy(alpha = 0.15f),
+                            RoundedCornerShape(20.dp)
+                        )
+                        .clickable { selectedFilter = label }
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                ) {
+                    Text(
+                        text = "$label ($count)",
+                        fontFamily = if (isSelected) PlusJakartaSans else DMSans,
+                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                        fontSize = 12.sp,
+                        color = if (isSelected) PurpleCore else TextMuted
+                    )
+                }
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        // App list
+        if (filteredApps.isEmpty()) {
+            Text(
+                if (searchQuery.isNotEmpty()) "No apps match your search."
+                else "No apps found on this device.",
+                fontFamily = DMSans,
+                fontSize = 13.sp,
+                color = TextMuted,
+                modifier = Modifier.padding(vertical = 16.dp)
+            )
+        }
+
+        filteredApps.forEachIndexed { index, app ->
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -802,7 +959,7 @@ private fun AppsTab(isDark: Boolean, textColor: Color) {
                     Spacer(Modifier.width(12.dp))
                     Column {
                         Text(
-                            app.name,
+                            app.appName,
                             fontFamily = DMSans,
                             fontSize = 13.sp,
                             color = textColor
@@ -813,29 +970,39 @@ private fun AppsTab(isDark: Boolean, textColor: Color) {
                             fontSize = 9.sp,
                             color = TextMuted
                         )
+                        if (!app.versionName.isNullOrBlank()) {
+                            Text(
+                                "v${app.versionName}",
+                                fontFamily = JetBrainsMono,
+                                fontSize = 9.sp,
+                                color = TextMuted
+                            )
+                        }
                     }
                 }
+                val statusLabel = if (app.isSystemApp == true) "System" else "User"
+                val statusColor = if (app.isSystemApp == true) Warning else Success
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(100.dp))
-                        .background(app.statusColor.copy(alpha = 0.10f))
+                        .background(statusColor.copy(alpha = 0.10f))
                         .border(
                             1.dp,
-                            app.statusColor.copy(alpha = 0.25f),
+                            statusColor.copy(alpha = 0.25f),
                             RoundedCornerShape(100.dp)
                         )
                         .padding(horizontal = 8.dp, vertical = 4.dp)
                 ) {
                     Text(
-                        app.status,
+                        statusLabel,
                         fontFamily = JetBrainsMono,
                         fontSize = 10.sp,
-                        color = app.statusColor,
+                        color = statusColor,
                         fontWeight = FontWeight.Bold
                     )
                 }
             }
-            if (index < apps.size - 1) {
+            if (index < filteredApps.size - 1) {
                 HorizontalDivider(color = PurpleCore.copy(alpha = 0.08f), thickness = 1.dp)
             }
         }
