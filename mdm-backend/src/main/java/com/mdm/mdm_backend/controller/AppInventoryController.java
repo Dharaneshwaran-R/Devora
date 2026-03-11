@@ -39,8 +39,7 @@ public class AppInventoryController {
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(Map.of(
                         "message", "App inventory saved successfully",
-                        "appsCount", saved.size()
-                ));
+                        "appsCount", saved.size()));
     }
 
     @GetMapping("/app-inventory/{deviceId}")
@@ -63,11 +62,16 @@ public class AppInventoryController {
                 ? "New app installed"
                 : "App updated";
 
-        String message = String.format("%s %s \"%s\" (%s)",
+        // Enhanced message with more details
+        String message = String.format(
+                "%s %s app:\n- Name: %s\n- Package: %s\n- Version: %s (%d)\n- System App: %s",
                 employeeName,
                 request.getAction().equals("INSTALLED") ? "installed" : "updated",
                 request.getAppName(),
-                request.getPackageName());
+                request.getPackageName(),
+                request.getVersionName() != null ? request.getVersionName() : "",
+                request.getVersionCode() != null ? request.getVersionCode() : 0,
+                request.getIsSystemApp() != null && request.getIsSystemApp() ? "Yes" : "No");
 
         AdminNotification notification = AdminNotification.builder()
                 .deviceId(request.getDeviceId())
@@ -91,7 +95,8 @@ public class AppInventoryController {
                 .build();
         appInventoryRepository.save(app);
 
-        log.info("App {} notification: {} on device {}", request.getAction(), request.getAppName(), request.getDeviceId());
+        log.info("App {} notification: {} on device {}", request.getAction(), request.getAppName(),
+                request.getDeviceId());
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(Map.of("message", "Notification recorded"));
     }
