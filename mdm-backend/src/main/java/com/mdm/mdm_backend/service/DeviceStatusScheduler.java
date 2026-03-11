@@ -27,22 +27,22 @@ import java.util.List;
 public class DeviceStatusScheduler {
 
     // How long with no heartbeat before a device is considered inactive
-    private static final int INACTIVE_THRESHOLD_MINUTES = 30;
+    private static final int INACTIVE_THRESHOLD_SECONDS = 60;
 
     private final DeviceRepository deviceRepository;
 
-    @Scheduled(fixedDelay = 5 * 60 * 1000) // every 5 minutes
+    @Scheduled(fixedDelay = 30_000) // every 30 seconds
     @Transactional
     public void markStaleDevicesInactive() {
-        LocalDateTime threshold = LocalDateTime.now().minusMinutes(INACTIVE_THRESHOLD_MINUTES);
+        LocalDateTime threshold = LocalDateTime.now().minusSeconds(INACTIVE_THRESHOLD_SECONDS);
         List<Device> staleDevices = deviceRepository.findStaleActiveDevices(threshold);
 
         if (staleDevices.isEmpty()) {
             return;
         }
 
-        log.info("Marking {} stale device(s) as INACTIVE (no heartbeat for {}+ min)",
-                staleDevices.size(), INACTIVE_THRESHOLD_MINUTES);
+        log.info("Marking {} stale device(s) as INACTIVE (no heartbeat for {}+ sec)",
+                staleDevices.size(), INACTIVE_THRESHOLD_SECONDS);
 
         for (Device device : staleDevices) {
             device.setStatus("INACTIVE");

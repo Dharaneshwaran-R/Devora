@@ -43,6 +43,10 @@ class MainActivity : ComponentActivity() {
         SyncWorker.schedule(this)
         DeviceInfoSyncWorker.schedule(this)
 
+        // Start foreground heartbeat service — sends heartbeat every 30s so the
+        // backend can detect uninstall within ~30–90 seconds.
+        com.devora.devicemanager.sync.HeartbeatService.start(this)
+
         setContent {
             val themeVm: ThemeViewModel = viewModel()
             val isDark = themeVm.isDark
