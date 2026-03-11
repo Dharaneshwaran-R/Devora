@@ -84,6 +84,8 @@ import com.devora.devicemanager.ui.theme.Warning as WarningColor
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import com.devora.devicemanager.network.AdminNotification
+import kotlinx.coroutines.delay
 
 // ══════════════════════════════════════
 // STAT DATA CLASS
@@ -107,7 +109,22 @@ private data class Activity(
     val color: Color
 )
 
-private val recentActivities = emptyList<Activity>()
+private fun formatTimeAgo(isoDateTime: String?): String {
+    if (isoDateTime.isNullOrEmpty()) return "just now"
+    return try {
+        val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.getDefault())
+        val date = sdf.parse(isoDateTime) ?: return "just now"
+        val diffSec = (System.currentTimeMillis() - date.time) / 1000
+        when {
+            diffSec < 60 -> "just now"
+            diffSec < 3600 -> "${diffSec / 60}m ago"
+            diffSec < 86400 -> "${diffSec / 3600}h ago"
+            else -> "${diffSec / 86400}d ago"
+        }
+    } catch (e: Exception) {
+        "just now"
+    }
+}
 
 // ══════════════════════════════════════
 // DASHBOARD SCREEN
@@ -136,6 +153,22 @@ fun DashboardScreen(
             }
         } catch (e: Exception) {
             Log.e("DashboardScreen", "Failed to fetch dashboard stats", e)
+        }
+    }
+
+    var notifications by remember { mutableStateOf<List<AdminNotification>>(emptyList()) }
+
+    LaunchedEffect("notifications") {
+        while (true) {
+            try {
+                val response = RetrofitClient.api.getNotifications()
+                if (response.isSuccessful) {
+                    notifications = response.body() ?: emptyList()
+                }
+            } catch (e: Exception) {
+                Log.e("DashboardScreen", "Failed to fetch notifications", e)
+            }
+            delay(10_000L)
         }
     }
 
@@ -430,7 +463,19 @@ fun DashboardScreen(
             item {
                 Box(modifier = Modifier.padding(horizontal = 16.dp)) {
                     DevoraCard(isDark = isDark) {
-                        if (recentActivities.isEmpty()) {
+                        val activities = notifications.take(10).map { n ->
+                            Activity(
+                                description = n.message ?: n.title,
+                                device = "Device ···${n.deviceId.takeLast(6)}",
+                                time = formatTimeAgo(n.createdAt),
+                                color = when (n.type) {
+                                    "APP_INSTALLED" -> Success
+                                    "APP_UPDATED" -> WarningColor
+                                    else -> Danger
+                                }
+                            )
+                        }
+                        if (activities.isEmpty()) {
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -456,7 +501,7 @@ fun DashboardScreen(
                             }
                         } else {
                             Column {
-                                recentActivities.forEachIndexed { index, activity ->
+                                activities.forEachIndexed { index, activity ->
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
@@ -494,7 +539,7 @@ fun DashboardScreen(
                                             color = TextMuted
                                         )
                                     }
-                                    if (index < recentActivities.size - 1) {
+                                    if (index < activities.size - 1) {
                                         HorizontalDivider(
                                             thickness = 1.dp,
                                             color = if (isDark) {
@@ -515,3 +560,4 @@ fun DashboardScreen(
         }
     }
 }
+`

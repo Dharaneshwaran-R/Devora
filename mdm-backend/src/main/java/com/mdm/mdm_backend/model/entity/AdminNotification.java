@@ -2,6 +2,7 @@ package com.mdm.mdm_backend.model.entity;
 
 import jakarta.persistence.*;
 import lombok.*;
+import tools.jackson.annotation.JsonFormat;
 import java.time.LocalDateTime;
 
 @Entity
@@ -26,5 +27,6 @@ public class AdminNotification {
 
     private boolean read;
 
+    @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd'T'HH:mm:ss")
     private LocalDateTime createdAt;
 }
