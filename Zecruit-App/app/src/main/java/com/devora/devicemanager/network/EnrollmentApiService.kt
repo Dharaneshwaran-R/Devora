@@ -161,6 +161,20 @@ data class EnrollmentTokenResponse(
 )
 
 // ══════════════════════════════════════
+// ADMIN NOTIFICATION
+// ══════════════════════════════════════
+
+data class AdminNotification(
+    @SerializedName("id") val id: Long,
+    @SerializedName("deviceId") val deviceId: String,
+    @SerializedName("type") val type: String,       // APP_INSTALLED / APP_UPDATED / APP_REMOVED
+    @SerializedName("title") val title: String,
+    @SerializedName("message") val message: String?,
+    @SerializedName("read") val read: Boolean,
+    @SerializedName("createdAt") val createdAt: String?
+)
+
+// ══════════════════════════════════════
 // RETROFIT API INTERFACE
 // ══════════════════════════════════════
 
@@ -212,6 +226,9 @@ interface EnrollmentApiService {
 
     @POST("api/devices/{deviceId}/heartbeat")
     suspend fun sendHeartbeat(@Path("deviceId") deviceId: String): Response<Unit>
+
+    @GET("api/notifications")
+    suspend fun getNotifications(): Response<List<AdminNotification>>
 
     @GET("api/enrollment/active")
     suspend fun getActiveEnrollments(): Response<List<EnrollmentTokenResponse>>
