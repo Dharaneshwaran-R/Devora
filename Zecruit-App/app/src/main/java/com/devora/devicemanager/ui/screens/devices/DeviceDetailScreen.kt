@@ -753,6 +753,7 @@ private fun AppsTab(deviceId: String, isDark: Boolean, textColor: Color) {
     var errorMsg by remember { mutableStateOf<String?>(null) }
     var searchQuery by remember { mutableStateOf("") }
     var selectedFilter by remember { mutableStateOf("ALL") }
+    var selectedApp by remember { mutableStateOf<AppInventoryItem?>(null) }
 
     val surfaceBg = if (isDark) DarkBgSurface else BgSurface
 
@@ -934,7 +935,8 @@ private fun AppsTab(deviceId: String, isDark: Boolean, textColor: Color) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 10.dp),
+                    .padding(vertical = 10.dp)
+                    .clickable { selectedApp = app },
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -1004,6 +1006,65 @@ private fun AppsTab(deviceId: String, isDark: Boolean, textColor: Color) {
             }
             if (index < filteredApps.size - 1) {
                 HorizontalDivider(color = PurpleCore.copy(alpha = 0.08f), thickness = 1.dp)
+            }
+        }
+
+        // App details dialog
+        if (selectedApp != null) {
+            Dialog(onDismissRequest = { selectedApp = null }, properties = DialogProperties()) {
+                DevoraCard(accentColor = PurpleCore, isDark = isDark) {
+                    Column(modifier = Modifier.padding(20.dp)) {
+                        Text(
+                            text = selectedApp!!.appName,
+                            fontFamily = PlusJakartaSans,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp,
+                            color = textColor
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            text = "Package: ${selectedApp!!.packageName}",
+                            fontFamily = JetBrainsMono,
+                            fontSize = 12.sp,
+                            color = TextMuted
+                        )
+                        if (!selectedApp!!.versionName.isNullOrBlank()) {
+                            Text(
+                                text = "Version: v${selectedApp!!.versionName}",
+                                fontFamily = JetBrainsMono,
+                                fontSize = 12.sp,
+                                color = TextMuted
+                            )
+                        }
+                        if (selectedApp!!.versionCode != null) {
+                            Text(
+                                text = "Version code: ${selectedApp!!.versionCode}",
+                                fontFamily = JetBrainsMono,
+                                fontSize = 12.sp,
+                                color = TextMuted
+                            )
+                        }
+                        if (!selectedApp!!.installSource.isNullOrBlank()) {
+                            Text(
+                                text = "Install source: ${selectedApp!!.installSource}",
+                                fontFamily = JetBrainsMono,
+                                fontSize = 12.sp,
+                                color = TextMuted
+                            )
+                        }
+                        Spacer(Modifier.height(16.dp))
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                            Text(
+                                text = "Close",
+                                fontFamily = DMSans,
+                                fontWeight = FontWeight.Medium,
+                                fontSize = 14.sp,
+                                color = PurpleCore,
+                                modifier = Modifier.clickable { selectedApp = null }
+                            )
+                        }
+                    }
+                }
             }
         }
     }
