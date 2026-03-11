@@ -80,6 +80,7 @@ object SyncManager {
                     packageName = app.packageName,
                     versionName = app.versionName,
                     versionCode = app.versionCode,
+                    installSource = app.installSource,
                     isSystemApp = app.isSystemApp
                 )
             }

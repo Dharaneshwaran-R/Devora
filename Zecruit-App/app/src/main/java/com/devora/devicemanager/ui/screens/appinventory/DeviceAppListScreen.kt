@@ -26,6 +26,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.Apps
+import androidx.compose.material.icons.outlined.Block
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -98,7 +99,9 @@ fun DeviceAppListScreen(
         try {
             val rsp = RetrofitClient.api.getRestrictedApps(deviceId)
             if (rsp.isSuccessful) {
-                restrictedPackages = (rsp.body() ?: emptyList()).map { it.packageName }.toSet()
+                restrictedPackages = (rsp.body() ?: emptyList())
+                    .filter { it.restricted }
+                    .map { it.packageName }.toSet()
             }
         } catch (e: Exception) {
             Log.e("DeviceAppList", "Failed to fetch restricted apps: ${e.message}")
@@ -309,10 +312,15 @@ fun DeviceAppListScreen(
             } else {
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(0.dp)) {
                     items(filteredApps, key = { it.id }) { app ->
+                        val isRestricted = app.packageName in restrictedPackages
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(vertical = 10.dp),
+                                .then(
+                                    if (isRestricted) Modifier.background(Danger.copy(alpha = 0.05f))
+                                    else Modifier
+                                )
+                                .padding(vertical = 10.dp, horizontal = 2.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             // App icon placeholder
@@ -320,13 +328,17 @@ fun DeviceAppListScreen(
                                 modifier = Modifier
                                     .size(40.dp)
                                     .clip(CircleShape)
-                                    .background(PurpleDim),
+                                    .background(
+                                        if (isRestricted) Danger.copy(alpha = 0.10f)
+                                        else PurpleDim
+                                    ),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
-                                    Icons.Outlined.Apps,
+                                    if (isRestricted) Icons.Outlined.Block
+                                    else Icons.Outlined.Apps,
                                     contentDescription = null,
-                                    tint = PurpleCore,
+                                    tint = if (isRestricted) Danger else PurpleCore,
                                     modifier = Modifier.size(20.dp)
                                 )
                             }
@@ -339,7 +351,7 @@ fun DeviceAppListScreen(
                                     fontFamily = DMSans,
                                     fontWeight = FontWeight.Medium,
                                     fontSize = 13.sp,
-                                    color = textColor
+                                    color = if (isRestricted) Danger else textColor
                                 )
                                 Text(
                                     app.packageName,
@@ -347,56 +359,46 @@ fun DeviceAppListScreen(
                                     fontSize = 9.sp,
                                     color = TextMuted
                                 )
-                                if (!app.versionName.isNullOrEmpty()) {
+                                // Version + Version Code
+                                val versionInfo = buildString {
+                                    if (!app.versionName.isNullOrEmpty()) append("v${app.versionName}")
+                                    if (app.versionCode != null) {
+                                        if (isNotEmpty()) append(" · ")
+                                        append("code ${app.versionCode}")
+                                    }
+                                }
+                                if (versionInfo.isNotEmpty()) {
                                     Text(
-                                        "v${app.versionName}",
+                                        versionInfo,
                                         fontFamily = JetBrainsMono,
                                         fontSize = 9.sp,
                                         color = TextMuted
                                     )
                                 }
+                                // Install source
+                                val source = formatInstallSource(app.installSource)
+                                if (source.isNotEmpty()) {
+                                    Text(
+                                        source,
+                                        fontFamily = JetBrainsMono,
+                                        fontSize = 9.sp,
+                                        color = PurpleCore.copy(alpha = 0.70f)
+                                    )
+                                }
                             }
 
-                            // System/User badge
+                            // Restrict / Allow button
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(100.dp))
                                     .background(
-                                        if (app.isSystemApp == true) Warning.copy(alpha = 0.10f)
-                                        else Success.copy(alpha = 0.10f)
+                                        if (isRestricted) Success.copy(alpha = 0.10f)
+                                        else Danger.copy(alpha = 0.10f)
                                     )
                                     .border(
                                         1.dp,
-                                        if (app.isSystemApp == true) Warning.copy(alpha = 0.25f)
-                                        else Success.copy(alpha = 0.25f),
-                                        RoundedCornerShape(100.dp)
-                                    )
-                                    .padding(horizontal = 8.dp, vertical = 4.dp)
-                            ) {
-                                Text(
-                                    if (app.isSystemApp == true) "System" else "User",
-                                    fontFamily = JetBrainsMono,
-                                    fontSize = 9.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (app.isSystemApp == true) Warning else Success
-                                )
-                            }
-
-                            Spacer(Modifier.width(6.dp))
-
-                            // Restrict / Restricted button
-                            val isRestricted = app.packageName in restrictedPackages
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(100.dp))
-                                    .background(
-                                        if (isRestricted) Danger.copy(alpha = 0.12f)
-                                        else PurpleCore.copy(alpha = 0.10f)
-                                    )
-                                    .border(
-                                        1.dp,
-                                        if (isRestricted) Danger.copy(alpha = 0.30f)
-                                        else PurpleCore.copy(alpha = 0.25f),
+                                        if (isRestricted) Success.copy(alpha = 0.30f)
+                                        else Danger.copy(alpha = 0.25f),
                                         RoundedCornerShape(100.dp)
                                     )
                                     .clickable(
@@ -410,7 +412,7 @@ fun DeviceAppListScreen(
                                                     RestrictAppRequestNew(
                                                         packageName = app.packageName,
                                                         appName = app.appName,
-                                                        installSource = "",
+                                                        installSource = app.installSource ?: "",
                                                         restricted = !isRestricted
                                                     )
                                                 )
@@ -426,14 +428,14 @@ fun DeviceAppListScreen(
                                             }
                                         }
                                     }
-                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                                    .padding(horizontal = 10.dp, vertical = 5.dp)
                             ) {
                                 Text(
-                                    if (isRestricted) "Restricted" else "Restrict",
+                                    if (isRestricted) "Allow" else "Restrict",
                                     fontFamily = JetBrainsMono,
-                                    fontSize = 9.sp,
+                                    fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = if (isRestricted) Danger else PurpleCore
+                                    color = if (isRestricted) Success else Danger
                                 )
                             }
                         }
@@ -445,5 +447,22 @@ fun DeviceAppListScreen(
                 }
             }
         }
+    }
+}
+
+private fun formatInstallSource(source: String?): String {
+    if (source.isNullOrBlank()) return ""
+    return when {
+        source.contains("vending", ignoreCase = true) -> "\uD83D\uDED2 Play Store"
+        source.contains("google.android.packageinstaller", ignoreCase = true) -> "\uD83D\uDCE6 Package Installer"
+        source.contains("vivo", ignoreCase = true) -> "\uD83D\uDCF1 Vivo Store"
+        source.contains("samsung", ignoreCase = true) -> "\uD83C\uDF1F Galaxy Store"
+        source.contains("oppo", ignoreCase = true) || source.contains("heytap", ignoreCase = true) -> "\uD83D\uDCF1 OPPO Store"
+        source.contains("xiaomi", ignoreCase = true) || source.contains("miui", ignoreCase = true) -> "\uD83D\uDCF1 Mi Store"
+        source.contains("huawei", ignoreCase = true) -> "\uD83D\uDCF1 Huawei Store"
+        source.contains("amazon", ignoreCase = true) -> "\uD83D\uDED2 Amazon Store"
+        source.contains("browser", ignoreCase = true) || source.contains("chrome", ignoreCase = true) -> "\uD83C\uDF10 Browser / APK"
+        source == "com.android.shell" || source == "adb" -> "\u2699\uFE0F ADB / Sideloaded"
+        else -> "\uD83D\uDCE6 $source"
     }
 }

@@ -91,7 +91,7 @@ class PolicySyncWorker(
         dpm: DevicePolicyManager,
         admin: android.content.ComponentName
     ) {
-        val response = RetrofitClient.api.getRestrictedApps(deviceId)
+        val response = RetrofitClient.api.getAllAppRestrictions(deviceId)
         if (!response.isSuccessful) return
 
         val restrictions = response.body() ?: emptyList()

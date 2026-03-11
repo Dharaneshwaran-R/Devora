@@ -5,24 +5,21 @@ import android.content.pm.ApplicationInfo
 import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import android.os.Build
+import android.util.Log
 
-/**
- * Metadata for a single installed application.
- */
 data class AppInfo(
     val appName: String,
     val packageName: String,
     val versionName: String,
     val versionCode: Long,
-    val isSystemApp: Boolean
+    val isSystemApp: Boolean,
+    val installSource: String
 )
 
 object AppInventoryCollector {
 
-    /**
-     * Returns a list of every installed app on the device.
-     * Uses only API-26+ compatible, non-deprecated methods.
-     */
+    private const val TAG = "AppInventoryCollector"
+
     fun collect(context: Context): List<AppInfo> {
         val pm = context.packageManager
 
@@ -50,12 +47,32 @@ object AppInventoryCollector {
             (it.flags and ApplicationInfo.FLAG_SYSTEM) != 0
         } ?: false
 
+        val installer = getInstallerPackage(pm, packageName.orEmpty())
+
         return AppInfo(
             appName = appLabel,
             packageName = packageName.orEmpty(),
             versionName = versionName.orEmpty(),
             versionCode = versionCode,
-            isSystemApp = isSystem
+            isSystemApp = isSystem,
+            installSource = installer
         )
+    }
+
+    private fun getInstallerPackage(pm: PackageManager, pkg: String): String {
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                val sourceInfo = pm.getInstallSourceInfo(pkg)
+                sourceInfo.installingPackageName
+                    ?: sourceInfo.initiatingPackageName
+                    ?: ""
+            } else {
+                @Suppress("DEPRECATION")
+                pm.getInstallerPackageName(pkg) ?: ""
+            }
+        } catch (e: Exception) {
+            Log.d(TAG, "Could not get installer for $pkg: ${e.message}")
+            ""
+        }
     }
 }

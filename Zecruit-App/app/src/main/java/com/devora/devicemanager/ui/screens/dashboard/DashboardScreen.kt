@@ -615,102 +615,286 @@ fun DashboardScreen(
         ModalBottomSheet(
             onDismissRequest = { showAlerts = false },
             sheetState = sheetState,
-            containerColor = if (isDark) DarkBgBase else Color.White
+            containerColor = if (isDark) DarkBgBase else Color.White,
+            dragHandle = {
+                Box(
+                    modifier = Modifier
+                        .padding(top = 12.dp, bottom = 4.dp)
+                        .width(40.dp)
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(PurpleCore.copy(alpha = 0.25f))
+                )
+            }
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
-                    .heightIn(min = 200.dp, max = 500.dp)
+                    .heightIn(min = 200.dp, max = 550.dp)
             ) {
-                Text(
-                    "Unread Alerts",
-                    fontFamily = PlusJakartaSans,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 18.sp,
-                    color = textColor,
-                    modifier = Modifier.padding(bottom = 12.dp)
+                // Header
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp)
+                        .padding(bottom = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(PurpleCore.copy(alpha = 0.10f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Filled.Notifications,
+                            contentDescription = null,
+                            tint = PurpleCore,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "Notifications",
+                            fontFamily = PlusJakartaSans,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp,
+                            color = textColor
+                        )
+                        Text(
+                            "${unreadAlerts.size} unread alert${if (unreadAlerts.size != 1) "s" else ""}",
+                            fontFamily = JetBrainsMono,
+                            fontSize = 11.sp,
+                            color = TextMuted
+                        )
+                    }
+                    if (unreadAlerts.isNotEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Danger.copy(alpha = 0.08f))
+                                .clickable {
+                                    coroutineScope.launch {
+                                        try {
+                                            val allIds = unreadAlerts.map { it.id }
+                                            RetrofitClient.api.markAlertsRead(
+                                                MarkAlertsReadRequest(allIds)
+                                            )
+                                            unreadAlerts = emptyList()
+                                            unreadCount = 0
+                                        } catch (_: Exception) { }
+                                    }
+                                }
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            Text(
+                                "Clear All",
+                                fontFamily = DMSans,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Danger
+                            )
+                        }
+                    }
+                }
+
+                HorizontalDivider(
+                    color = if (isDark) PurpleCore.copy(alpha = 0.08f) else BgElevated,
+                    thickness = 1.dp
                 )
 
                 if (unreadAlerts.isEmpty()) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(vertical = 32.dp),
+                            .padding(vertical = 48.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(
-                            "No unread alerts",
-                            fontFamily = DMSans,
-                            fontSize = 14.sp,
-                            color = TextMuted
-                        )
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Box(
+                                modifier = Modifier
+                                    .size(56.dp)
+                                    .clip(CircleShape)
+                                    .background(Success.copy(alpha = 0.08f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    Icons.Filled.CheckCircle,
+                                    contentDescription = null,
+                                    tint = Success,
+                                    modifier = Modifier.size(28.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(
+                                "All clear!",
+                                fontFamily = PlusJakartaSans,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 16.sp,
+                                color = textColor
+                            )
+                            Text(
+                                "No unread notifications",
+                                fontFamily = DMSans,
+                                fontSize = 13.sp,
+                                color = TextMuted
+                            )
+                        }
                     }
                 } else {
-                    LazyColumn {
+                    LazyColumn(
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                        contentPadding = PaddingValues(vertical = 8.dp)
+                    ) {
                         items(unreadAlerts) { alert ->
                             val alertColor = when (alert.severity) {
                                 "CRITICAL" -> Danger
                                 "WARNING" -> WarningColor
                                 else -> PurpleCore
                             }
-                            Row(
+                            val alertIcon = when (alert.severity) {
+                                "CRITICAL" -> Icons.Outlined.Security
+                                "WARNING" -> Icons.Filled.Warning
+                                else -> Icons.Filled.Notifications
+                            }
+                            val severityLabel = when (alert.severity) {
+                                "CRITICAL" -> "Critical"
+                                "WARNING" -> "Warning"
+                                else -> "Info"
+                            }
+
+                            Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(vertical = 10.dp),
-                                verticalAlignment = Alignment.CenterVertically
+                                    .padding(vertical = 4.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(
+                                        if (isDark) alertColor.copy(alpha = 0.06f)
+                                        else alertColor.copy(alpha = 0.04f)
+                                    )
+                                    .border(
+                                        1.dp,
+                                        alertColor.copy(alpha = 0.12f),
+                                        RoundedCornerShape(12.dp)
+                                    )
+                                    .padding(12.dp)
                             ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(8.dp)
-                                        .background(alertColor, CircleShape)
-                                )
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = alert.message ?: "Alert",
-                                        fontFamily = DMSans,
-                                        fontSize = 13.sp,
-                                        color = textColor
-                                    )
-                                    Text(
-                                        text = formatTimeAgo(alert.createdAt),
-                                        fontFamily = JetBrainsMono,
-                                        fontSize = 10.sp,
-                                        color = TextMuted
-                                    )
-                                }
-                                // Dismiss button
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(alertColor.copy(alpha = 0.10f))
-                                        .clickable {
-                                            coroutineScope.launch {
-                                                try {
-                                                    RetrofitClient.api.markAlertsRead(
-                                                        MarkAlertsReadRequest(listOf(alert.id))
-                                                    )
-                                                    unreadAlerts = unreadAlerts.filter { it.id != alert.id }
-                                                    unreadCount = (unreadCount - 1).coerceAtLeast(0)
-                                                } catch (_: Exception) { }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.Top
+                                ) {
+                                    // Severity icon
+                                    Box(
+                                        modifier = Modifier
+                                            .size(32.dp)
+                                            .clip(CircleShape)
+                                            .background(alertColor.copy(alpha = 0.12f)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            alertIcon,
+                                            contentDescription = null,
+                                            tint = alertColor,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        // Severity + Type badges row
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .clip(RoundedCornerShape(4.dp))
+                                                    .background(alertColor.copy(alpha = 0.12f))
+                                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                                            ) {
+                                                Text(
+                                                    severityLabel.uppercase(),
+                                                    fontFamily = JetBrainsMono,
+                                                    fontSize = 8.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = alertColor
+                                                )
+                                            }
+                                            if (!alert.alertType.isNullOrBlank()) {
+                                                Text(
+                                                    alert.alertType!!.replace("_", " "),
+                                                    fontFamily = JetBrainsMono,
+                                                    fontSize = 9.sp,
+                                                    color = TextMuted
+                                                )
                                             }
                                         }
-                                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                                ) {
-                                    Text(
-                                        "Dismiss",
-                                        fontFamily = DMSans,
-                                        fontSize = 11.sp,
-                                        color = alertColor,
-                                        fontWeight = FontWeight.Medium
-                                    )
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        // Alert message
+                                        Text(
+                                            text = alert.message ?: "Alert",
+                                            fontFamily = DMSans,
+                                            fontWeight = FontWeight.Medium,
+                                            fontSize = 13.sp,
+                                            color = textColor,
+                                            maxLines = 3
+                                        )
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        // Footer: employee + time + dismiss
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            if (!alert.employeeName.isNullOrBlank()) {
+                                                Text(
+                                                    alert.employeeName!!,
+                                                    fontFamily = JetBrainsMono,
+                                                    fontSize = 9.sp,
+                                                    color = PurpleCore.copy(alpha = 0.7f)
+                                                )
+                                                Text(
+                                                    " · ",
+                                                    fontSize = 9.sp,
+                                                    color = TextMuted
+                                                )
+                                            }
+                                            Text(
+                                                formatTimeAgo(alert.createdAt),
+                                                fontFamily = JetBrainsMono,
+                                                fontSize = 9.sp,
+                                                color = TextMuted
+                                            )
+                                            Spacer(modifier = Modifier.weight(1f))
+                                            Box(
+                                                modifier = Modifier
+                                                    .clip(RoundedCornerShape(6.dp))
+                                                    .background(alertColor.copy(alpha = 0.08f))
+                                                    .clickable {
+                                                        coroutineScope.launch {
+                                                            try {
+                                                                RetrofitClient.api.markAlertsRead(
+                                                                    MarkAlertsReadRequest(listOf(alert.id))
+                                                                )
+                                                                unreadAlerts = unreadAlerts.filter { it.id != alert.id }
+                                                                unreadCount = (unreadCount - 1).coerceAtLeast(0)
+                                                            } catch (_: Exception) { }
+                                                        }
+                                                    }
+                                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                                            ) {
+                                                Text(
+                                                    "Dismiss",
+                                                    fontFamily = DMSans,
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    color = alertColor
+                                                )
+                                            }
+                                        }
+                                    }
                                 }
                             }
-                            HorizontalDivider(
-                                thickness = 1.dp,
-                                color = if (isDark) PurpleCore.copy(alpha = 0.10f) else BgElevated
-                            )
                         }
                     }
                 }

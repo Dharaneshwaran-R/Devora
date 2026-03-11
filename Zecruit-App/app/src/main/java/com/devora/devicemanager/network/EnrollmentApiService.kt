@@ -53,6 +53,7 @@ data class AppInventoryRequest(
     @SerializedName("packageName") val packageName: String,
     @SerializedName("versionName") val versionName: String,
     @SerializedName("versionCode") val versionCode: Long,
+    @SerializedName("installSource") val installSource: String,
     @SerializedName("isSystemApp") val isSystemApp: Boolean
 )
 
@@ -343,6 +344,11 @@ interface EnrollmentApiService {
 
     @GET("api/devices/{deviceId}/restricted-apps")
     suspend fun getRestrictedApps(
+        @Path("deviceId") deviceId: String
+    ): Response<List<DeviceAppRestrictionResponse>>
+
+    @GET("api/devices/{deviceId}/app-restrictions")
+    suspend fun getAllAppRestrictions(
         @Path("deviceId") deviceId: String
     ): Response<List<DeviceAppRestrictionResponse>>
 

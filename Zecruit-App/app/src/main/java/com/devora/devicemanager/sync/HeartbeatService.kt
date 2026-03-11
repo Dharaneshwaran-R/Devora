@@ -118,7 +118,7 @@ class HeartbeatService : Service() {
             }
 
             val admin = AdminReceiver.getComponentName(this@HeartbeatService)
-            val response = RetrofitClient.api.getRestrictedApps(deviceId)
+            val response = RetrofitClient.api.getAllAppRestrictions(deviceId)
             if (!response.isSuccessful) return
 
             val restrictions = response.body() ?: emptyList()

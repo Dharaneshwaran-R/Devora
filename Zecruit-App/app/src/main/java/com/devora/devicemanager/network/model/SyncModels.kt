@@ -48,6 +48,7 @@ data class AppInfoDto(
     @SerializedName("packageName") val packageName: String,
     @SerializedName("versionName") val versionName: String,
     @SerializedName("versionCode") val versionCode: Long,
+    @SerializedName("installSource") val installSource: String,
     @SerializedName("isSystemApp") val isSystemApp: Boolean
 )
 

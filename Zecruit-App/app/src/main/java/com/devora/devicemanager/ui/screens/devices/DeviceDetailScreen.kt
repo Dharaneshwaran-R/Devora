@@ -1074,56 +1074,105 @@ private fun AppsTab(deviceId: String, isDark: Boolean, textColor: Color) {
 
         // App details dialog
         if (selectedApp != null) {
+            val app = selectedApp!!
+            val isAppRestricted = restrictedApps[app.packageName]?.restricted == true
             Dialog(onDismissRequest = { selectedApp = null }, properties = DialogProperties()) {
-                DevoraCard(accentColor = PurpleCore, isDark = isDark) {
+                DevoraCard(accentColor = if (isAppRestricted) Danger else PurpleCore, isDark = isDark) {
                     Column(modifier = Modifier.padding(20.dp)) {
-                        Text(
-                            text = selectedApp!!.appName,
-                            fontFamily = PlusJakartaSans,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 18.sp,
-                            color = textColor
-                        )
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            text = "Package: ${selectedApp!!.packageName}",
-                            fontFamily = JetBrainsMono,
-                            fontSize = 12.sp,
-                            color = TextMuted
-                        )
-                        if (!selectedApp!!.versionName.isNullOrBlank()) {
-                            Text(
-                                text = "Version: v${selectedApp!!.versionName}",
-                                fontFamily = JetBrainsMono,
-                                fontSize = 12.sp,
-                                color = TextMuted
-                            )
+                        // Header with app name + status badge
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .clip(CircleShape)
+                                    .background(
+                                        if (isAppRestricted) Danger.copy(alpha = 0.10f)
+                                        else PurpleCore.copy(alpha = 0.10f)
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    if (isAppRestricted) Icons.Outlined.Block
+                                    else Icons.Outlined.Apps,
+                                    contentDescription = null,
+                                    tint = if (isAppRestricted) Danger else PurpleCore,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                            Spacer(Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = app.appName,
+                                    fontFamily = PlusJakartaSans,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 17.sp,
+                                    color = if (isAppRestricted) Danger else textColor
+                                )
+                                Text(
+                                    text = if (app.isSystemApp == true) "System App" else "User App",
+                                    fontFamily = JetBrainsMono,
+                                    fontSize = 10.sp,
+                                    color = TextMuted
+                                )
+                            }
+                            if (isAppRestricted) {
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(Danger.copy(alpha = 0.12f))
+                                        .padding(horizontal = 8.dp, vertical = 3.dp)
+                                ) {
+                                    Text(
+                                        "BLOCKED",
+                                        fontFamily = JetBrainsMono,
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Danger
+                                    )
+                                }
+                            }
                         }
-                        if (selectedApp!!.versionCode != null) {
-                            Text(
-                                text = "Version code: ${selectedApp!!.versionCode}",
-                                fontFamily = JetBrainsMono,
-                                fontSize = 12.sp,
-                                color = TextMuted
-                            )
-                        }
-                        if (!selectedApp!!.installSource.isNullOrBlank()) {
-                            Text(
-                                text = "Install source: ${selectedApp!!.installSource}",
-                                fontFamily = JetBrainsMono,
-                                fontSize = 12.sp,
-                                color = TextMuted
-                            )
-                        }
+
                         Spacer(Modifier.height(16.dp))
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        HorizontalDivider(color = PurpleCore.copy(alpha = 0.08f))
+                        Spacer(Modifier.height(12.dp))
+
+                        // Info rows
+                        AppInfoRow("Package Name", app.packageName, textColor, isDark)
+                        if (!app.versionName.isNullOrBlank()) {
+                            AppInfoRow("App Version", "v${app.versionName}", textColor, isDark)
+                        }
+                        if (app.versionCode != null) {
+                            AppInfoRow("Version Code", app.versionCode.toString(), textColor, isDark)
+                        }
+                        // Installation Source — human readable
+                        val sourceRaw = app.installSource
+                        val sourceLabel = if (!sourceRaw.isNullOrBlank()) formatInstallSource(sourceRaw) else "Unknown"
+                        AppInfoRow("Installed From", sourceLabel, textColor, isDark)
+                        if (!sourceRaw.isNullOrBlank() && sourceRaw != sourceLabel) {
+                            AppInfoRow("Source Package", sourceRaw, textColor, isDark)
+                        }
+
+                        Spacer(Modifier.height(16.dp))
+                        // Close button
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(PurpleCore.copy(alpha = 0.08f))
+                                .clickable { selectedApp = null }
+                                .padding(vertical = 10.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
                             Text(
-                                text = "Close",
+                                "Close",
                                 fontFamily = DMSans,
-                                fontWeight = FontWeight.Medium,
+                                fontWeight = FontWeight.SemiBold,
                                 fontSize = 14.sp,
-                                color = PurpleCore,
-                                modifier = Modifier.clickable { selectedApp = null }
+                                color = PurpleCore
                             )
                         }
                     }
@@ -1798,6 +1847,33 @@ private fun formatTimeAgo(isoDateTime: String?): String {
         }
     } catch (_: Exception) {
         "just now"
+    }
+}
+
+@Composable
+private fun AppInfoRow(label: String, value: String, textColor: Color, isDark: Boolean) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.Top
+    ) {
+        Text(
+            text = label,
+            fontFamily = DMSans,
+            fontSize = 12.sp,
+            color = TextMuted,
+            modifier = Modifier.weight(0.4f)
+        )
+        Text(
+            text = value,
+            fontFamily = JetBrainsMono,
+            fontSize = 11.sp,
+            color = textColor,
+            modifier = Modifier.weight(0.6f),
+            fontWeight = FontWeight.Medium
+        )
     }
 }
 

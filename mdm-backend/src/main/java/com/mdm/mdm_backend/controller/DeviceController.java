@@ -145,6 +145,11 @@ public class DeviceController {
 
     @GetMapping("/devices/{deviceId}/restricted-apps")
     public ResponseEntity<List<DeviceAppRestriction>> getRestrictedApps(@PathVariable String deviceId) {
+        return ResponseEntity.ok(appRestrictionRepo.findByDeviceIdAndRestricted(deviceId, true));
+    }
+
+    @GetMapping("/devices/{deviceId}/app-restrictions")
+    public ResponseEntity<List<DeviceAppRestriction>> getAllAppRestrictions(@PathVariable String deviceId) {
         return ResponseEntity.ok(appRestrictionRepo.findByDeviceId(deviceId));
     }
 
