@@ -87,6 +87,9 @@ dependencies {
     implementation(libs.room.ktx)
     ksp(libs.room.compiler)
 
+    // Google Play Services — Location
+    implementation(libs.play.services.location)
+
     // JSON
     implementation(libs.gson)
 

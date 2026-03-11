@@ -68,10 +68,18 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.devora.devicemanager.network.AppInventoryItem
+import com.devora.devicemanager.network.DeviceActivityResponse
+import com.devora.devicemanager.network.DeviceAppRestrictionResponse
+import com.devora.devicemanager.network.DeviceLocationResponse
+import com.devora.devicemanager.network.DevicePolicyResponse
 import com.devora.devicemanager.network.DeviceResponse
+import com.devora.devicemanager.network.LocationReportRequest
+import com.devora.devicemanager.network.PolicyUpdateRequest
+import com.devora.devicemanager.network.RestrictAppRequestNew
 import com.devora.devicemanager.network.RetrofitClient
 import com.devora.devicemanager.ui.components.DevoraCard
 import com.devora.devicemanager.ui.components.SectionHeader
@@ -260,8 +268,9 @@ fun DeviceDetailScreen(
             when (selectedTab) {
                 0 -> InfoTab(device = device, deviceResponse = deviceResponse, isDark = isDark, textColor = textColor)
                 1 -> AppsTab(deviceId = deviceId, isDark = isDark, textColor = textColor)
-                2 -> ActivityTab(isDark = isDark, textColor = textColor)
+                2 -> ActivityTab(deviceId = deviceId, isDark = isDark, textColor = textColor)
                 3 -> ActionsTab(
+                    deviceId = deviceId,
                     isDark = isDark,
                     textColor = textColor,
                     isSyncing = isSyncing,
@@ -304,7 +313,16 @@ fun DeviceDetailScreen(
             onConfirm = {
                 showLockDialog = false
                 coroutineScope.launch {
-                    snackbarHostState.showSnackbar("✓ Device locked successfully")
+                    try {
+                        val resp = RetrofitClient.api.lockDevice(deviceId)
+                        if (resp.isSuccessful) {
+                            snackbarHostState.showSnackbar("✓ Lock command sent")
+                        } else {
+                            snackbarHostState.showSnackbar("✗ Failed to lock device")
+                        }
+                    } catch (e: Exception) {
+                        snackbarHostState.showSnackbar("✗ Failed: ${e.message}")
+                    }
                 }
             }
         )
@@ -575,7 +593,16 @@ fun DeviceDetailScreen(
                                         showWipeDialog = false
                                         wipeStep = 0
                                         coroutineScope.launch {
-                                            snackbarHostState.showSnackbar("⚠ Device wipe initiated")
+                                            try {
+                                                val resp = RetrofitClient.api.wipeDevice(deviceId)
+                                                if (resp.isSuccessful) {
+                                                    snackbarHostState.showSnackbar("⚠ Device wipe command sent")
+                                                } else {
+                                                    snackbarHostState.showSnackbar("✗ Failed to wipe device")
+                                                }
+                                            } catch (e: Exception) {
+                                                snackbarHostState.showSnackbar("✗ Failed: ${e.message}")
+                                            }
                                         }
                                     },
                                 contentAlignment = Alignment.Center
@@ -749,11 +776,13 @@ private fun InfoTab(device: Device, deviceResponse: DeviceResponse?, isDark: Boo
 @Composable
 private fun AppsTab(deviceId: String, isDark: Boolean, textColor: Color) {
     var apps by remember { mutableStateOf<List<AppInventoryItem>>(emptyList()) }
+    var restrictedApps by remember { mutableStateOf<Map<String, DeviceAppRestrictionResponse>>(emptyMap()) }
     var isLoading by remember { mutableStateOf(true) }
     var errorMsg by remember { mutableStateOf<String?>(null) }
     var searchQuery by remember { mutableStateOf("") }
     var selectedFilter by remember { mutableStateOf("ALL") }
     var selectedApp by remember { mutableStateOf<AppInventoryItem?>(null) }
+    val coroutineScope = rememberCoroutineScope()
 
     val surfaceBg = if (isDark) DarkBgSurface else BgSurface
 
@@ -766,6 +795,11 @@ private fun AppsTab(deviceId: String, isDark: Boolean, textColor: Color) {
                 errorMsg = null
             } else {
                 errorMsg = "Failed to load apps (${response.code()})"
+            }
+            // Load restricted apps
+            val restrictResp = RetrofitClient.api.getRestrictedApps(deviceId)
+            if (restrictResp.isSuccessful) {
+                restrictedApps = (restrictResp.body() ?: emptyList()).associateBy { it.packageName }
             }
         } catch (e: Exception) {
             errorMsg = "Failed to load apps. Check connection."
@@ -932,9 +966,12 @@ private fun AppsTab(deviceId: String, isDark: Boolean, textColor: Color) {
         }
 
         filteredApps.forEachIndexed { index, app ->
+            val isRestricted = restrictedApps[app.packageName]?.restricted == true
+            val appBg = if (isRestricted) Danger.copy(alpha = 0.05f) else Color.Transparent
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .background(appBg)
                     .padding(vertical = 10.dp)
                     .clickable { selectedApp = app },
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -948,13 +985,13 @@ private fun AppsTab(deviceId: String, isDark: Boolean, textColor: Color) {
                         modifier = Modifier
                             .size(36.dp)
                             .clip(CircleShape)
-                            .background(PurpleDim),
+                            .background(if (isRestricted) Danger.copy(alpha = 0.10f) else PurpleDim),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            Icons.Outlined.Apps,
+                            if (isRestricted) Icons.Outlined.Block else Icons.Outlined.Apps,
                             contentDescription = null,
-                            tint = PurpleCore,
+                            tint = if (isRestricted) Danger else PurpleCore,
                             modifier = Modifier.size(18.dp)
                         )
                     }
@@ -964,7 +1001,7 @@ private fun AppsTab(deviceId: String, isDark: Boolean, textColor: Color) {
                             app.appName,
                             fontFamily = DMSans,
                             fontSize = 13.sp,
-                            color = textColor
+                            color = if (isRestricted) Danger else textColor
                         )
                         Text(
                             app.packageName,
@@ -972,34 +1009,60 @@ private fun AppsTab(deviceId: String, isDark: Boolean, textColor: Color) {
                             fontSize = 9.sp,
                             color = TextMuted
                         )
-                        if (!app.versionName.isNullOrBlank()) {
+                        val sourceLabel = formatInstallSource(app.installSource)
+                        if (sourceLabel.isNotEmpty()) {
                             Text(
-                                "v${app.versionName}",
-                                fontFamily = JetBrainsMono,
+                                sourceLabel,
+                                fontFamily = DMSans,
                                 fontSize = 9.sp,
                                 color = TextMuted
                             )
                         }
                     }
                 }
-                val statusLabel = if (app.isSystemApp == true) "System" else "User"
-                val statusColor = if (app.isSystemApp == true) Warning else Success
+                // Restrict / Allow toggle
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(100.dp))
-                        .background(statusColor.copy(alpha = 0.10f))
+                        .background(
+                            if (isRestricted) Success.copy(alpha = 0.10f)
+                            else Danger.copy(alpha = 0.10f)
+                        )
                         .border(
                             1.dp,
-                            statusColor.copy(alpha = 0.25f),
+                            if (isRestricted) Success.copy(alpha = 0.25f)
+                            else Danger.copy(alpha = 0.25f),
                             RoundedCornerShape(100.dp)
                         )
+                        .clickable {
+                            coroutineScope.launch {
+                                try {
+                                    val req = RestrictAppRequestNew(
+                                        packageName = app.packageName,
+                                        appName = app.appName,
+                                        installSource = app.installSource,
+                                        restricted = !isRestricted
+                                    )
+                                    val resp = RetrofitClient.api.restrictApp(deviceId, req)
+                                    if (resp.isSuccessful) {
+                                        // Refresh restricted apps
+                                        val rResp = RetrofitClient.api.getRestrictedApps(deviceId)
+                                        if (rResp.isSuccessful) {
+                                            restrictedApps = (rResp.body() ?: emptyList()).associateBy { it.packageName }
+                                        }
+                                    }
+                                } catch (e: Exception) {
+                                    Log.e("AppsTab", "Restrict toggle failed: ${e.message}")
+                                }
+                            }
+                        }
                         .padding(horizontal = 8.dp, vertical = 4.dp)
                 ) {
                     Text(
-                        statusLabel,
+                        if (isRestricted) "Allow" else "Restrict",
                         fontFamily = JetBrainsMono,
                         fontSize = 10.sp,
-                        color = statusColor,
+                        color = if (isRestricted) Success else Danger,
                         fontWeight = FontWeight.Bold
                     )
                 }
@@ -1075,24 +1138,58 @@ private fun AppsTab(deviceId: String, isDark: Boolean, textColor: Color) {
 // ══════════════════════════════════════
 
 @Composable
-private fun ActivityTab(isDark: Boolean, textColor: Color) {
-    val activities = listOf(
-        Triple("Device enrolled via QR code", "Today, 10:23 AM", Success),
-        Triple("Enterprise policies applied", "Today, 10:24 AM", PurpleCore),
-        Triple("Screen lock enforced", "Today, 10:24 AM", PurpleCore),
-        Triple("App inventory scanned", "Today, 10:25 AM", Success),
-        Triple("WhatsApp blocked by policy", "Today, 10:25 AM", Danger),
-        Triple("Instagram blocked by policy", "Today, 10:25 AM", Danger),
-        Triple("Device synced with server", "Today, 10:30 AM", Success),
-        Triple("Security scan passed", "Today, 10:35 AM", Success),
-        Triple("Location reported", "Today, 10:40 AM", PurpleCore),
-        Triple("Battery level: 85%", "Today, 11:00 AM", Success)
-    )
+private fun ActivityTab(deviceId: String, isDark: Boolean, textColor: Color) {
+    var activities by remember { mutableStateOf<List<DeviceActivityResponse>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(true) }
+
+    LaunchedEffect(deviceId) {
+        isLoading = true
+        try {
+            val response = RetrofitClient.api.getDeviceActivities(deviceId)
+            if (response.isSuccessful) {
+                activities = response.body() ?: emptyList()
+            }
+        } catch (e: Exception) {
+            Log.e("ActivityTab", "Failed to fetch activities: ${e.message}")
+        }
+        isLoading = false
+    }
+
+    if (isLoading) {
+        Box(
+            modifier = Modifier.fillMaxWidth().padding(32.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            CircularProgressIndicator(color = PurpleCore, modifier = Modifier.size(32.dp))
+        }
+        return
+    }
 
     DevoraCard(accentColor = PurpleCore, isDark = isDark) {
         SectionHeader(title = "DEVICE ACTIVITY LOG", isDark = isDark)
 
-        activities.forEachIndexed { index, (event, time, color) ->
+        if (activities.isEmpty()) {
+            Text(
+                "No activity recorded yet.",
+                fontFamily = DMSans,
+                fontSize = 13.sp,
+                color = TextMuted,
+                modifier = Modifier.padding(vertical = 16.dp)
+            )
+        }
+
+        activities.forEachIndexed { index, activity ->
+            val color = when (activity.severity) {
+                "CRITICAL" -> Danger
+                "WARNING" -> Warning
+                else -> when {
+                    activity.activityType?.contains("RESTRICT") == true -> Danger
+                    activity.activityType?.contains("WIPE") == true -> Danger
+                    activity.activityType?.contains("LOCK") == true -> PurpleCore
+                    activity.activityType?.contains("POLICY") == true -> PurpleCore
+                    else -> Success
+                }
+            }
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1106,15 +1203,24 @@ private fun ActivityTab(isDark: Boolean, textColor: Color) {
                         .background(color)
                 )
                 Spacer(Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        activity.description ?: "Unknown activity",
+                        fontFamily = DMSans,
+                        fontSize = 13.sp,
+                        color = textColor
+                    )
+                    if (!activity.employeeName.isNullOrBlank()) {
+                        Text(
+                            activity.employeeName!!,
+                            fontFamily = DMSans,
+                            fontSize = 11.sp,
+                            color = TextMuted
+                        )
+                    }
+                }
                 Text(
-                    event,
-                    fontFamily = DMSans,
-                    fontSize = 13.sp,
-                    color = textColor,
-                    modifier = Modifier.weight(1f)
-                )
-                Text(
-                    time,
+                    formatTimeAgo(activity.createdAt),
                     fontFamily = JetBrainsMono,
                     fontSize = 9.sp,
                     color = TextMuted
@@ -1133,6 +1239,7 @@ private fun ActivityTab(isDark: Boolean, textColor: Color) {
 
 @Composable
 private fun ActionsTab(
+    deviceId: String,
     isDark: Boolean,
     textColor: Color,
     isSyncing: Boolean,
@@ -1142,6 +1249,28 @@ private fun ActionsTab(
     onSync: () -> Unit,
     onWipe: () -> Unit
 ) {
+    val coroutineScope = rememberCoroutineScope()
+    var cameraDisabled by remember { mutableStateOf(false) }
+    var policyLoaded by remember { mutableStateOf(false) }
+    var location by remember { mutableStateOf<DeviceLocationResponse?>(null) }
+
+    // Load policies and location
+    LaunchedEffect(deviceId) {
+        try {
+            val pResp = RetrofitClient.api.getDevicePolicies(deviceId)
+            if (pResp.isSuccessful) {
+                cameraDisabled = pResp.body()?.cameraDisabled ?: false
+                policyLoaded = true
+            }
+        } catch (_: Exception) { }
+        try {
+            val lResp = RetrofitClient.api.getDeviceLocation(deviceId)
+            if (lResp.isSuccessful) {
+                location = lResp.body()
+            }
+        } catch (_: Exception) { }
+    }
+
     DevoraCard(accentColor = PurpleCore, isDark = isDark) {
         SectionHeader(title = "REMOTE ACTIONS", isDark = isDark)
 
@@ -1153,6 +1282,92 @@ private fun ActionsTab(
             textColor = textColor,
             onClick = onLock
         )
+
+        // Camera toggle
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(enabled = policyLoaded) {
+                    coroutineScope.launch {
+                        try {
+                            val newVal = !cameraDisabled
+                            val resp = RetrofitClient.api.updateDevicePolicy(
+                                deviceId,
+                                PolicyUpdateRequest(cameraDisabled = newVal)
+                            )
+                            if (resp.isSuccessful) {
+                                cameraDisabled = newVal
+                            }
+                        } catch (_: Exception) { }
+                    }
+                }
+                .padding(vertical = 14.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.weight(1f)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(CircleShape)
+                        .background(
+                            if (cameraDisabled) Danger.copy(alpha = 0.10f)
+                            else Warning.copy(alpha = 0.10f)
+                        )
+                        .border(
+                            1.dp,
+                            if (cameraDisabled) Danger.copy(alpha = 0.25f)
+                            else Warning.copy(alpha = 0.25f),
+                            CircleShape
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Outlined.CameraAlt,
+                        contentDescription = null,
+                        tint = if (cameraDisabled) Danger else Warning,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+                Spacer(Modifier.width(14.dp))
+                Column {
+                    Text(
+                        if (cameraDisabled) "Camera Disabled" else "Camera Enabled",
+                        fontFamily = PlusJakartaSans,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 14.sp,
+                        color = textColor
+                    )
+                    Text(
+                        if (cameraDisabled) "Tap to enable camera" else "Tap to disable camera",
+                        fontFamily = DMSans,
+                        fontSize = 12.sp,
+                        color = TextMuted
+                    )
+                }
+            }
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(100.dp))
+                    .background(
+                        if (cameraDisabled) Danger.copy(alpha = 0.10f)
+                        else Success.copy(alpha = 0.10f)
+                    )
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+            ) {
+                Text(
+                    if (cameraDisabled) "OFF" else "ON",
+                    fontFamily = JetBrainsMono,
+                    fontSize = 10.sp,
+                    color = if (cameraDisabled) Danger else Success,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+        HorizontalDivider(color = PurpleCore.copy(alpha = 0.08f), thickness = 1.dp)
 
         ActionRow(
             title = "Force Password Reset",
@@ -1269,6 +1484,116 @@ private fun ActionsTab(
             textColor = textColor,
             onClick = onWipe
         )
+    }
+
+    Spacer(Modifier.height(16.dp))
+
+    // ── GPS LOCATION ──
+    val context = LocalContext.current
+    DevoraCard(accentColor = PurpleCore, isDark = isDark) {
+        SectionHeader(title = "DEVICE LOCATION", isDark = isDark)
+
+        if (location != null && location!!.latitude != null && location!!.longitude != null) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("Latitude", fontFamily = DMSans, fontSize = 13.sp, color = TextMuted)
+                Text(
+                    "${location!!.latitude}",
+                    fontFamily = JetBrainsMono,
+                    fontSize = 13.sp,
+                    color = textColor
+                )
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("Longitude", fontFamily = DMSans, fontSize = 13.sp, color = TextMuted)
+                Text(
+                    "${location!!.longitude}",
+                    fontFamily = JetBrainsMono,
+                    fontSize = 13.sp,
+                    color = textColor
+                )
+            }
+            if (location!!.accuracy != null) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("Accuracy", fontFamily = DMSans, fontSize = 13.sp, color = TextMuted)
+                    Text(
+                        "${location!!.accuracy}m",
+                        fontFamily = JetBrainsMono,
+                        fontSize = 13.sp,
+                        color = textColor
+                    )
+                }
+            }
+            if (!location!!.recordedAt.isNullOrBlank()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("Last Updated", fontFamily = DMSans, fontSize = 13.sp, color = TextMuted)
+                    Text(
+                        formatTimeAgo(location!!.recordedAt),
+                        fontFamily = JetBrainsMono,
+                        fontSize = 13.sp,
+                        color = textColor
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            // Open in Google Maps button
+            val mapsUrl = "https://www.google.com/maps?q=${location!!.latitude},${location!!.longitude}"
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(44.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(PurpleCore)
+                    .clickable {
+                        try {
+                            val intent = android.content.Intent(
+                                android.content.Intent.ACTION_VIEW,
+                                android.net.Uri.parse(mapsUrl)
+                            )
+                            intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                            context.startActivity(intent)
+                        } catch (_: Exception) { }
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    "Open in Google Maps",
+                    fontFamily = PlusJakartaSans,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 14.sp,
+                    color = Color.White
+                )
+            }
+        } else {
+            Text(
+                "No location data available yet.",
+                fontFamily = DMSans,
+                fontSize = 13.sp,
+                color = TextMuted,
+                modifier = Modifier.padding(vertical = 16.dp)
+            )
+        }
     }
 }
 
@@ -1452,5 +1777,40 @@ private fun ConfirmActionDialog(
                 }
             }
         }
+    }
+}
+
+// ══════════════════════════════════════
+// HELPER FUNCTIONS
+// ══════════════════════════════════════
+
+private fun formatTimeAgo(isoDateTime: String?): String {
+    if (isoDateTime.isNullOrEmpty()) return "just now"
+    return try {
+        val sdf = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.getDefault())
+        val date = sdf.parse(isoDateTime) ?: return "just now"
+        val diffSec = (System.currentTimeMillis() - date.time) / 1000
+        when {
+            diffSec < 60 -> "just now"
+            diffSec < 3600 -> "${diffSec / 60}m ago"
+            diffSec < 86400 -> "${diffSec / 3600}h ago"
+            else -> "${diffSec / 86400}d ago"
+        }
+    } catch (_: Exception) {
+        "just now"
+    }
+}
+
+private fun formatInstallSource(source: String?): String {
+    if (source.isNullOrBlank()) return ""
+    return when {
+        source.contains("vending", ignoreCase = true) || source.contains("google", ignoreCase = true) -> "\uD83D\uDCE6 Play Store"
+        source.contains("vivo", ignoreCase = true) -> "\uD83D\uDCE6 Vivo Store"
+        source.contains("samsung", ignoreCase = true) -> "\uD83D\uDCE6 Galaxy Store"
+        source.contains("xiaomi", ignoreCase = true) || source.contains("miui", ignoreCase = true) -> "\uD83D\uDCE6 Mi Store"
+        source.contains("browser", ignoreCase = true) || source.contains("download", ignoreCase = true) -> "\uD83C\uDF10 Browser/APK"
+        source.contains("adb", ignoreCase = true) || source.contains("shell", ignoreCase = true) -> "\uD83D\uDCF2 ADB/Sideloaded"
+        source.contains("packageinstaller", ignoreCase = true) -> "\uD83D\uDCF2 Manual Install"
+        else -> "\uD83D\uDCF1 $source"
     }
 }

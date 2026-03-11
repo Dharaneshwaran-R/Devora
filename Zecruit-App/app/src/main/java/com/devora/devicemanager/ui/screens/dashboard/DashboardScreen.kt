@@ -63,6 +63,9 @@ import com.devora.devicemanager.ui.components.DevoraBottomNav
 import com.devora.devicemanager.ui.components.DevoraCard
 import com.devora.devicemanager.ui.components.SectionHeader
 import com.devora.devicemanager.network.DashboardStats
+import com.devora.devicemanager.network.DeviceActivityResponse
+import com.devora.devicemanager.network.MdmAlertResponse
+import com.devora.devicemanager.network.MarkAlertsReadRequest
 import com.devora.devicemanager.network.RetrofitClient
 import com.devora.devicemanager.ui.theme.BgBase
 import com.devora.devicemanager.ui.theme.BgElevated
@@ -84,8 +87,12 @@ import com.devora.devicemanager.ui.theme.Warning as WarningColor
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import com.devora.devicemanager.network.AdminNotification
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
 
 // ══════════════════════════════════════
 // STAT DATA CLASS
@@ -130,6 +137,7 @@ private fun formatTimeAgo(isoDateTime: String?): String {
 // DASHBOARD SCREEN
 // ══════════════════════════════════════
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DashboardScreen(
     onNavigate: (String) -> Unit,
@@ -156,19 +164,38 @@ fun DashboardScreen(
         }
     }
 
-    var notifications by remember { mutableStateOf<List<AdminNotification>>(emptyList()) }
+    // Real activities from device_activities table
+    var recentActivities by remember { mutableStateOf<List<DeviceActivityResponse>>(emptyList()) }
 
-    LaunchedEffect("notifications") {
+    LaunchedEffect("activities") {
         while (true) {
             try {
-                val response = RetrofitClient.api.getNotifications()
+                val response = RetrofitClient.api.getActivities(limit = 10)
                 if (response.isSuccessful) {
-                    notifications = response.body() ?: emptyList()
+                    recentActivities = response.body() ?: emptyList()
                 }
             } catch (e: Exception) {
-                Log.e("DashboardScreen", "Failed to fetch notifications", e)
+                Log.e("DashboardScreen", "Failed to fetch activities", e)
             }
-            delay(10_000L)
+            delay(30_000L) // refresh every 30s
+        }
+    }
+
+    // Unread alert count for bell badge
+    var unreadCount by remember { mutableStateOf(0) }
+    var showAlerts by remember { mutableStateOf(false) }
+    var unreadAlerts by remember { mutableStateOf<List<MdmAlertResponse>>(emptyList()) }
+    val coroutineScope = rememberCoroutineScope()
+
+    LaunchedEffect("alertCount") {
+        while (true) {
+            try {
+                val resp = RetrofitClient.api.getUnreadAlertCount()
+                if (resp.isSuccessful) {
+                    unreadCount = resp.body()?.count ?: 0
+                }
+            } catch (_: Exception) { }
+            delay(60_000L) // poll every 60s
         }
     }
 
@@ -236,21 +263,41 @@ fun DashboardScreen(
                             )
                         }
                         Box {
-                            IconButton(onClick = { }) {
+                            IconButton(onClick = {
+                                coroutineScope.launch {
+                                    try {
+                                        val resp = RetrofitClient.api.getUnreadAlerts()
+                                        if (resp.isSuccessful) {
+                                            unreadAlerts = resp.body() ?: emptyList()
+                                        }
+                                    } catch (_: Exception) { }
+                                    showAlerts = true
+                                }
+                            }) {
                                 Icon(
                                     imageVector = Icons.Filled.Notifications,
                                     contentDescription = "Notifications",
                                     tint = PurpleCore
                                 )
                             }
-                            // Red dot badge
-                            Box(
-                                modifier = Modifier
-                                    .size(8.dp)
-                                    .background(Danger, CircleShape)
-                                    .align(Alignment.TopEnd)
-                                    .padding(top = 8.dp, end = 8.dp)
-                            )
+                            if (unreadCount > 0) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(18.dp)
+                                        .background(Danger, CircleShape)
+                                        .align(Alignment.TopEnd)
+                                        .padding(top = 4.dp, end = 4.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = if (unreadCount > 9) "9+" else "$unreadCount",
+                                        fontFamily = JetBrainsMono,
+                                        fontSize = 9.sp,
+                                        color = Color.White,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -463,15 +510,15 @@ fun DashboardScreen(
             item {
                 Box(modifier = Modifier.padding(horizontal = 16.dp)) {
                     DevoraCard(isDark = isDark) {
-                        val activities = notifications.take(10).map { n ->
+                        val activities = recentActivities.map { a ->
                             Activity(
-                                description = n.message ?: n.title,
-                                device = "Device ···${n.deviceId.takeLast(6)}",
-                                time = formatTimeAgo(n.createdAt),
-                                color = when (n.type) {
-                                    "APP_INSTALLED" -> Success
-                                    "APP_UPDATED" -> WarningColor
-                                    else -> Danger
+                                description = a.description ?: "Unknown activity",
+                                device = if (!a.deviceId.isNullOrBlank()) "Device ···${a.deviceId!!.takeLast(6)}" else "",
+                                time = formatTimeAgo(a.createdAt),
+                                color = when (a.severity) {
+                                    "CRITICAL" -> Danger
+                                    "WARNING" -> WarningColor
+                                    else -> Success
                                 }
                             )
                         }
@@ -557,6 +604,119 @@ fun DashboardScreen(
             }
 
             item { Spacer(modifier = Modifier.height(16.dp)) }
+        }
+    }
+
+    // ══════════════════════════════════════
+    // ALERTS BOTTOM SHEET
+    // ══════════════════════════════════════
+    if (showAlerts) {
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(
+            onDismissRequest = { showAlerts = false },
+            sheetState = sheetState,
+            containerColor = if (isDark) DarkBgBase else Color.White
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                    .heightIn(min = 200.dp, max = 500.dp)
+            ) {
+                Text(
+                    "Unread Alerts",
+                    fontFamily = PlusJakartaSans,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp,
+                    color = textColor,
+                    modifier = Modifier.padding(bottom = 12.dp)
+                )
+
+                if (unreadAlerts.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 32.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            "No unread alerts",
+                            fontFamily = DMSans,
+                            fontSize = 14.sp,
+                            color = TextMuted
+                        )
+                    }
+                } else {
+                    LazyColumn {
+                        items(unreadAlerts) { alert ->
+                            val alertColor = when (alert.severity) {
+                                "CRITICAL" -> Danger
+                                "WARNING" -> WarningColor
+                                else -> PurpleCore
+                            }
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(8.dp)
+                                        .background(alertColor, CircleShape)
+                                )
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = alert.message ?: "Alert",
+                                        fontFamily = DMSans,
+                                        fontSize = 13.sp,
+                                        color = textColor
+                                    )
+                                    Text(
+                                        text = formatTimeAgo(alert.createdAt),
+                                        fontFamily = JetBrainsMono,
+                                        fontSize = 10.sp,
+                                        color = TextMuted
+                                    )
+                                }
+                                // Dismiss button
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(alertColor.copy(alpha = 0.10f))
+                                        .clickable {
+                                            coroutineScope.launch {
+                                                try {
+                                                    RetrofitClient.api.markAlertsRead(
+                                                        MarkAlertsReadRequest(listOf(alert.id))
+                                                    )
+                                                    unreadAlerts = unreadAlerts.filter { it.id != alert.id }
+                                                    unreadCount = (unreadCount - 1).coerceAtLeast(0)
+                                                } catch (_: Exception) { }
+                                            }
+                                        }
+                                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                                ) {
+                                    Text(
+                                        "Dismiss",
+                                        fontFamily = DMSans,
+                                        fontSize = 11.sp,
+                                        color = alertColor,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                            }
+                            HorizontalDivider(
+                                thickness = 1.dp,
+                                color = if (isDark) PurpleCore.copy(alpha = 0.10f) else BgElevated
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+            }
         }
     }
 }

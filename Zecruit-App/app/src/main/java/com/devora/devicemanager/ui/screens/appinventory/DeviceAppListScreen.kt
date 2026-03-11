@@ -48,7 +48,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.devora.devicemanager.network.AppInventoryItem
-import com.devora.devicemanager.network.RestrictAppRequest
+import com.devora.devicemanager.network.RestrictAppRequestNew
 import com.devora.devicemanager.network.RetrofitClient
 import com.devora.devicemanager.ui.components.DevoraCard
 import com.devora.devicemanager.ui.components.SectionHeader
@@ -405,18 +405,20 @@ fun DeviceAppListScreen(
                                     ) {
                                         scope.launch {
                                             try {
-                                                if (isRestricted) {
-                                                    val rsp = RetrofitClient.api.unrestrictApp(deviceId, app.packageName)
-                                                    if (rsp.isSuccessful) {
-                                                        restrictedPackages = restrictedPackages - app.packageName
-                                                    }
-                                                } else {
-                                                    val rsp = RetrofitClient.api.restrictApp(
-                                                        deviceId,
-                                                        RestrictAppRequest(app.packageName, app.appName)
+                                                val rsp = RetrofitClient.api.restrictApp(
+                                                    deviceId,
+                                                    RestrictAppRequestNew(
+                                                        packageName = app.packageName,
+                                                        appName = app.appName,
+                                                        installSource = "",
+                                                        restricted = !isRestricted
                                                     )
-                                                    if (rsp.isSuccessful) {
-                                                        restrictedPackages = restrictedPackages + app.packageName
+                                                )
+                                                if (rsp.isSuccessful) {
+                                                    restrictedPackages = if (isRestricted) {
+                                                        restrictedPackages - app.packageName
+                                                    } else {
+                                                        restrictedPackages + app.packageName
                                                     }
                                                 }
                                             } catch (e: Exception) {
