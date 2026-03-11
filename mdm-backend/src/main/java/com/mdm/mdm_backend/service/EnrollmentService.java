@@ -7,6 +7,8 @@ import com.mdm.mdm_backend.model.entity.DeviceInfo;
 import com.mdm.mdm_backend.model.entity.Employee;
 import com.mdm.mdm_backend.model.entity.EnrollmentToken;
 import com.mdm.mdm_backend.repository.AppInventoryRepository;
+import com.mdm.mdm_backend.repository.AdminNotificationRepository;
+import com.mdm.mdm_backend.repository.RestrictedAppRepository;
 import com.mdm.mdm_backend.repository.DeviceInfoRepository;
 import com.mdm.mdm_backend.repository.DeviceRepository;
 import com.mdm.mdm_backend.repository.EmployeeRepository;
@@ -30,6 +32,8 @@ public class EnrollmentService {
     private final EnrollmentTokenRepository enrollmentTokenRepository;
     private final DeviceInfoRepository deviceInfoRepository;
     private final AppInventoryRepository appInventoryRepository;
+    private final AdminNotificationRepository adminNotificationRepository;
+    private final RestrictedAppRepository restrictedAppRepository;
     private final EmployeeRepository employeeRepository;
 
     // ════════════════════════════════════════
@@ -215,7 +219,13 @@ public class EnrollmentService {
         // 2) DELETE FROM device_info WHERE device_id = ?
         deviceInfoRepository.deleteByDeviceId(deviceId);
 
-        // 3) UPDATE enrollment_tokens SET status = 'REVOKED' WHERE device_id = ?
+        // 3) DELETE notifications for this device
+        adminNotificationRepository.deleteByDeviceId(deviceId);
+
+        // 4) DELETE restricted apps for this device
+        restrictedAppRepository.deleteByDeviceId(deviceId);
+
+        // 5) UPDATE enrollment_tokens SET status = 'REVOKED' WHERE device_id = ?
         List<EnrollmentToken> tokens = enrollmentTokenRepository.findByDeviceId(deviceId);
         for (EnrollmentToken token : tokens) {
             token.setStatus("REVOKED");

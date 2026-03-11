@@ -37,6 +37,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -47,6 +48,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.devora.devicemanager.network.AppInventoryItem
+import com.devora.devicemanager.network.RestrictAppRequest
 import com.devora.devicemanager.network.RetrofitClient
 import com.devora.devicemanager.ui.components.DevoraCard
 import com.devora.devicemanager.ui.components.SectionHeader
@@ -66,6 +68,7 @@ import com.devora.devicemanager.ui.theme.Success
 import com.devora.devicemanager.ui.theme.TextMuted
 import com.devora.devicemanager.ui.theme.TextPrimary
 import com.devora.devicemanager.ui.theme.Warning
+import kotlinx.coroutines.launch
 
 @Composable
 fun DeviceAppListScreen(
@@ -78,8 +81,10 @@ fun DeviceAppListScreen(
 
     var isLoading by remember { mutableStateOf(true) }
     var allApps by remember { mutableStateOf<List<AppInventoryItem>>(emptyList()) }
+    var restrictedPackages by remember { mutableStateOf<Set<String>>(emptySet()) }
     var searchQuery by remember { mutableStateOf("") }
     var selectedFilter by remember { mutableStateOf("ALL") }
+    val scope = rememberCoroutineScope()
 
     LaunchedEffect(deviceId) {
         try {
@@ -89,6 +94,14 @@ fun DeviceAppListScreen(
             }
         } catch (e: Exception) {
             Log.e("DeviceAppList", "Failed to fetch app inventory: ${e.message}")
+        }
+        try {
+            val rsp = RetrofitClient.api.getRestrictedApps(deviceId)
+            if (rsp.isSuccessful) {
+                restrictedPackages = (rsp.body() ?: emptyList()).map { it.packageName }.toSet()
+            }
+        } catch (e: Exception) {
+            Log.e("DeviceAppList", "Failed to fetch restricted apps: ${e.message}")
         }
         isLoading = false
     }
@@ -366,6 +379,59 @@ fun DeviceAppListScreen(
                                     fontSize = 9.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = if (app.isSystemApp == true) Warning else Success
+                                )
+                            }
+
+                            Spacer(Modifier.width(6.dp))
+
+                            // Restrict / Restricted button
+                            val isRestricted = app.packageName in restrictedPackages
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(100.dp))
+                                    .background(
+                                        if (isRestricted) Danger.copy(alpha = 0.12f)
+                                        else PurpleCore.copy(alpha = 0.10f)
+                                    )
+                                    .border(
+                                        1.dp,
+                                        if (isRestricted) Danger.copy(alpha = 0.30f)
+                                        else PurpleCore.copy(alpha = 0.25f),
+                                        RoundedCornerShape(100.dp)
+                                    )
+                                    .clickable(
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = null
+                                    ) {
+                                        scope.launch {
+                                            try {
+                                                if (isRestricted) {
+                                                    val rsp = RetrofitClient.api.unrestrictApp(deviceId, app.packageName)
+                                                    if (rsp.isSuccessful) {
+                                                        restrictedPackages = restrictedPackages - app.packageName
+                                                    }
+                                                } else {
+                                                    val rsp = RetrofitClient.api.restrictApp(
+                                                        deviceId,
+                                                        RestrictAppRequest(app.packageName, app.appName)
+                                                    )
+                                                    if (rsp.isSuccessful) {
+                                                        restrictedPackages = restrictedPackages + app.packageName
+                                                    }
+                                                }
+                                            } catch (e: Exception) {
+                                                Log.e("DeviceAppList", "Restrict toggle failed: ${e.message}")
+                                            }
+                                        }
+                                    }
+                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Text(
+                                    if (isRestricted) "Restricted" else "Restrict",
+                                    fontFamily = JetBrainsMono,
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isRestricted) Danger else PurpleCore
                                 )
                             }
                         }

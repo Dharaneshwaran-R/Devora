@@ -9,4 +9,7 @@ public interface AdminNotificationRepository extends JpaRepository<AdminNotifica
     List<AdminNotification> findAllByOrderByCreatedAtDesc();
     List<AdminNotification> findByDeviceIdOrderByCreatedAtDesc(String deviceId);
     long countByReadFalse();
+
+    @org.springframework.transaction.annotation.Transactional
+    void deleteByDeviceId(String deviceId);
 }

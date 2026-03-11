@@ -77,6 +77,29 @@ data class NewAppNotification(
     @SerializedName("action") val action: String // "INSTALLED" or "UPDATED"
 )
 
+data class AdminNotification(
+    @SerializedName("id") val id: Long,
+    @SerializedName("deviceId") val deviceId: String,
+    @SerializedName("type") val type: String,
+    @SerializedName("title") val title: String,
+    @SerializedName("message") val message: String?,
+    @SerializedName("read") val read: Boolean,
+    @SerializedName("createdAt") val createdAt: String?
+)
+
+data class RestrictedApp(
+    @SerializedName("id") val id: Long,
+    @SerializedName("deviceId") val deviceId: String,
+    @SerializedName("packageName") val packageName: String,
+    @SerializedName("appName") val appName: String?,
+    @SerializedName("restrictedAt") val restrictedAt: String?
+)
+
+data class RestrictAppRequest(
+    @SerializedName("packageName") val packageName: String,
+    @SerializedName("appName") val appName: String
+)
+
 data class DashboardStats(
     @SerializedName("totalDevices") val totalDevices: Int,
     @SerializedName("activeDevices") val activeDevices: Int,
@@ -195,6 +218,12 @@ interface EnrollmentApiService {
     @POST("api/app-inventory/notify")
     suspend fun notifyNewApp(@Body notification: NewAppNotification): Response<Unit>
 
+    @GET("api/notifications")
+    suspend fun getNotifications(): Response<List<AdminNotification>>
+
+    @POST("api/devices/{deviceId}/heartbeat")
+    suspend fun sendHeartbeat(@Path("deviceId") deviceId: String): Response<Unit>
+
     @GET("api/dashboard/stats")
     suspend fun getDashboardStats(): Response<DashboardStats>
 
@@ -212,6 +241,23 @@ interface EnrollmentApiService {
 
     @GET("api/enrollment/active")
     suspend fun getActiveEnrollments(): Response<List<EnrollmentTokenResponse>>
+
+    @POST("api/devices/{deviceId}/restrict-app")
+    suspend fun restrictApp(
+        @Path("deviceId") deviceId: String,
+        @Body request: RestrictAppRequest
+    ): Response<Map<String, String>>
+
+    @DELETE("api/devices/{deviceId}/restrict-app/{packageName}")
+    suspend fun unrestrictApp(
+        @Path("deviceId") deviceId: String,
+        @Path("packageName") packageName: String
+    ): Response<Map<String, String>>
+
+    @GET("api/devices/{deviceId}/restricted-apps")
+    suspend fun getRestrictedApps(
+        @Path("deviceId") deviceId: String
+    ): Response<List<RestrictedApp>>
 }
 
 // ══════════════════════════════════════
