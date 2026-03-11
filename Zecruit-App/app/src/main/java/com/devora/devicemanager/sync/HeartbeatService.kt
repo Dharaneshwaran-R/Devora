@@ -106,7 +106,7 @@ class HeartbeatService : Service() {
     }
 
     /**
-     * Fetches restricted apps from backend and suspends them via DevicePolicyManager.
+     * Fetches restricted apps from backend and hides them via DevicePolicyManager.
      * Only works when the app is Device Owner.
      */
     private suspend fun enforceAppRestrictions(deviceId: String) {
@@ -121,28 +121,33 @@ class HeartbeatService : Service() {
             val response = RetrofitClient.api.getRestrictedApps(deviceId)
             if (!response.isSuccessful) return
 
-            val restrictedPackages = (response.body() ?: emptyList()).map { it.packageName }.toTypedArray()
+            val restrictions = response.body() ?: emptyList()
+            val restrictedPackages = mutableSetOf<String>()
 
-            if (restrictedPackages.isNotEmpty()) {
-                val failed = dpm.setPackagesSuspended(admin, restrictedPackages, true)
-                if (failed.isEmpty()) {
-                    Log.d(TAG, "Suspended ${restrictedPackages.size} apps")
+            for (r in restrictions) {
+                if (r.restricted) {
+                    restrictedPackages.add(r.packageName)
+                    val hidden = dpm.setApplicationHidden(admin, r.packageName, true)
+                    if (hidden) {
+                        Log.d(TAG, "Hidden app: ${r.packageName}")
+                    } else {
+                        Log.w(TAG, "Failed to hide: ${r.packageName}")
+                    }
                 } else {
-                    Log.w(TAG, "Failed to suspend: ${failed.joinToString()}")
+                    dpm.setApplicationHidden(admin, r.packageName, false)
                 }
             }
 
-            // Unsuspend previously restricted apps that are no longer in the list
+            // Unhide previously restricted apps that are no longer in the list
             val prefs = getSharedPreferences("devora_restrictions", Context.MODE_PRIVATE)
             val previousRestricted = prefs.getStringSet("restricted_packages", emptySet()) ?: emptySet()
-            val currentSet = restrictedPackages.toSet()
-            val toUnsuspend = previousRestricted - currentSet
-            if (toUnsuspend.isNotEmpty()) {
-                dpm.setPackagesSuspended(admin, toUnsuspend.toTypedArray(), false)
-                Log.d(TAG, "Unsuspended ${toUnsuspend.size} apps")
+            val toUnhide = previousRestricted - restrictedPackages
+            for (pkg in toUnhide) {
+                dpm.setApplicationHidden(admin, pkg, false)
+                Log.d(TAG, "Unhidden app: $pkg")
             }
 
-            prefs.edit().putStringSet("restricted_packages", currentSet).apply()
+            prefs.edit().putStringSet("restricted_packages", restrictedPackages).apply()
         } catch (e: Exception) {
             Log.w(TAG, "App restriction enforcement failed: ${e.message}")
         }

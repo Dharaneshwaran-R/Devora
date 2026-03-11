@@ -57,6 +57,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -98,6 +99,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 @Composable
 fun EmployeeDashboardScreen(
@@ -107,6 +109,7 @@ fun EmployeeDashboardScreen(
     onThemeToggle: () -> Unit
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val deviceInfo = remember { DeviceInfoCollector.collect(context) }
     val lifecycleOwner = LocalLifecycleOwner.current
     var selectedNavItem by remember { mutableIntStateOf(0) }
@@ -881,7 +884,15 @@ fun EmployeeDashboardScreen(
                                 )
                                 .clickable {
                                     showSignOutDialog = false
-                                    onSignOut()
+                                    // Notify backend and then sign out locally
+                                    scope.launch {
+                                        try {
+                                            RetrofitClient.api.signOutDevice(deviceInfo.deviceId)
+                                        } catch (e: Exception) {
+                                            // Optional: Handle error or log it
+                                        }
+                                        onSignOut()
+                                    }
                                 },
                             contentAlignment = Alignment.Center
                         ) {

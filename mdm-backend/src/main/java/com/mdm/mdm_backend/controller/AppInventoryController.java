@@ -4,11 +4,9 @@ import com.mdm.mdm_backend.model.dto.AppInventoryRequest;
 import com.mdm.mdm_backend.model.dto.NewAppNotificationRequest;
 import com.mdm.mdm_backend.model.entity.AdminNotification;
 import com.mdm.mdm_backend.model.entity.AppInventory;
-import com.mdm.mdm_backend.model.entity.RestrictedApp;
 import com.mdm.mdm_backend.repository.AdminNotificationRepository;
 import com.mdm.mdm_backend.repository.DeviceRepository;
 import com.mdm.mdm_backend.repository.AppInventoryRepository;
-import com.mdm.mdm_backend.repository.RestrictedAppRepository;
 import com.mdm.mdm_backend.service.AppInventoryService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -31,7 +29,6 @@ public class AppInventoryController {
     private final AdminNotificationRepository notificationRepository;
     private final DeviceRepository deviceRepository;
     private final AppInventoryRepository appInventoryRepository;
-    private final RestrictedAppRepository restrictedAppRepository;
 
     @PostMapping("/app-inventory")
     public ResponseEntity<?> saveInventory(@Valid @RequestBody AppInventoryRequest request) {
@@ -121,55 +118,5 @@ public class AppInventoryController {
                     return ResponseEntity.ok(Map.of("message", "Marked as read"));
                 })
                 .orElse(ResponseEntity.notFound().build());
-    }
-
-    // ═════════════════════════════════════════
-    // APP RESTRICTION
-    // ═════════════════════════════════════════
-
-    @PostMapping("/devices/{deviceId}/restrict-app")
-    public ResponseEntity<?> restrictApp(
-            @PathVariable String deviceId,
-            @RequestBody Map<String, String> body) {
-        String packageName = body.get("packageName");
-        String appName = body.getOrDefault("appName", packageName);
-
-        if (packageName == null || packageName.isBlank()) {
-            return ResponseEntity.badRequest()
-                    .body(Map.of("message", "packageName is required"));
-        }
-
-        if (restrictedAppRepository.existsByDeviceIdAndPackageName(deviceId, packageName)) {
-            return ResponseEntity.ok(Map.of("message", "App already restricted"));
-        }
-
-        RestrictedApp restricted = RestrictedApp.builder()
-                .deviceId(deviceId)
-                .packageName(packageName)
-                .appName(appName)
-                .restrictedAt(LocalDateTime.now())
-                .build();
-        restrictedAppRepository.save(restricted);
-
-        log.info("Restricted app {} on device {}", packageName, deviceId);
-        return ResponseEntity.status(HttpStatus.CREATED)
-                .body(Map.of("message", "App restricted successfully"));
-    }
-
-    @DeleteMapping("/devices/{deviceId}/restrict-app/{packageName}")
-    public ResponseEntity<?> unrestrictApp(
-            @PathVariable String deviceId,
-            @PathVariable String packageName) {
-        if (!restrictedAppRepository.existsByDeviceIdAndPackageName(deviceId, packageName)) {
-            return ResponseEntity.notFound().build();
-        }
-        restrictedAppRepository.deleteByDeviceIdAndPackageName(deviceId, packageName);
-        log.info("Unrestricted app {} on device {}", packageName, deviceId);
-        return ResponseEntity.ok(Map.of("message", "App unrestricted successfully"));
-    }
-
-    @GetMapping("/devices/{deviceId}/restricted-apps")
-    public ResponseEntity<List<RestrictedApp>> getRestrictedApps(@PathVariable String deviceId) {
-        return ResponseEntity.ok(restrictedAppRepository.findByDeviceId(deviceId));
     }
 }

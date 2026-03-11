@@ -603,7 +603,6 @@ fun DeviceListScreen(
                                     enrolledDevices = enrolledDevices.filter { it.deviceId != device.deviceId }
                                     showDeleteDialog = false
                                     deleteTargetDevice = null
-                                    refreshTick++
                                     snackbarHostState.showSnackbar("Device deleted successfully")
                                     Log.i("DeviceList", "Device ${device.name} deleted successfully")
                                 } else {

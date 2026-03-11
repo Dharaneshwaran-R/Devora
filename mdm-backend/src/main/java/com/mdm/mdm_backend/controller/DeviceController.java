@@ -1,17 +1,29 @@
+
 package com.mdm.mdm_backend.controller;
 
 import com.mdm.mdm_backend.model.dto.DeviceResponse;
+import com.mdm.mdm_backend.model.entity.Device;
+import com.mdm.mdm_backend.model.entity.DeviceActivity;
+import com.mdm.mdm_backend.model.entity.DeviceAppRestriction;
+import com.mdm.mdm_backend.model.entity.DeviceCommand;
+import com.mdm.mdm_backend.model.entity.DeviceLocation;
+import com.mdm.mdm_backend.model.entity.DevicePolicy;
+import com.mdm.mdm_backend.model.entity.MdmAlert;
+import com.mdm.mdm_backend.repository.DeviceActivityRepository;
+import com.mdm.mdm_backend.repository.DeviceAppRestrictionRepository;
+import com.mdm.mdm_backend.repository.DeviceCommandRepository;
+import com.mdm.mdm_backend.repository.DeviceLocationRepository;
+import com.mdm.mdm_backend.repository.DevicePolicyRepository;
+import com.mdm.mdm_backend.repository.DeviceRepository;
+import com.mdm.mdm_backend.repository.MdmAlertRepository;
 import com.mdm.mdm_backend.service.EnrollmentService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.DeleteMapping;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 
@@ -22,6 +34,13 @@ import java.util.Map;
 public class DeviceController {
 
     private final EnrollmentService enrollmentService;
+    private final DeviceAppRestrictionRepository appRestrictionRepo;
+    private final DevicePolicyRepository policyRepo;
+    private final DeviceCommandRepository commandRepo;
+    private final DeviceLocationRepository locationRepo;
+    private final DeviceActivityRepository activityRepo;
+    private final MdmAlertRepository alertRepo;
+    private final DeviceRepository deviceRepo;
 
     @GetMapping("/devices")
     public ResponseEntity<List<DeviceResponse>> getAllDevices() {
@@ -38,11 +57,22 @@ public class DeviceController {
     @DeleteMapping("/devices/{deviceId}")
     public ResponseEntity<Map<String, String>> deleteDevice(@PathVariable String deviceId) {
         try {
+            String employeeName = deviceRepo.findByDeviceId(deviceId)
+                    .map(Device::getEmployeeName).orElse("Unknown");
             boolean deleted = enrollmentService.deleteDeviceWithAllData(deviceId);
             if (!deleted) {
                 return ResponseEntity.status(HttpStatus.NOT_FOUND)
                         .body(Map.of("message", "Device not found"));
             }
+
+            activityRepo.save(DeviceActivity.builder()
+                    .deviceId(deviceId).employeeName(employeeName)
+                    .activityType("DELETED").description(employeeName + "'s device removed")
+                    .severity("CRITICAL").createdAt(LocalDateTime.now()).build());
+            alertRepo.save(MdmAlert.builder()
+                    .deviceId(deviceId).employeeName(employeeName)
+                    .alertType("DEVICE_DELETED").message(employeeName + "'s device was deleted")
+                    .isRead(false).severity("CRITICAL").createdAt(LocalDateTime.now()).build());
 
             return ResponseEntity.ok(Map.of("message", "Device deleted successfully"));
         } catch (Exception ex) {
@@ -59,4 +89,227 @@ public class DeviceController {
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.status(HttpStatus.NOT_FOUND).build());
     }
+
+    // ════════════════════════════════════════
+    // APP RESTRICTION
+    // ════════════════════════════════════════
+
+    @PostMapping("/devices/{deviceId}/restrict-app")
+    public ResponseEntity<?> restrictApp(@PathVariable String deviceId, @RequestBody Map<String, Object> body) {
+        String packageName = (String) body.get("packageName");
+        String appName = (String) body.getOrDefault("appName", packageName);
+        String installSource = (String) body.getOrDefault("installSource", "");
+        Boolean restricted = body.get("restricted") != null
+                ? Boolean.valueOf(body.get("restricted").toString()) : true;
+
+        if (packageName == null || packageName.isBlank())
+            return ResponseEntity.badRequest().body(Map.of("message", "packageName is required"));
+
+        var existing = appRestrictionRepo.findByDeviceIdAndPackageName(deviceId, packageName);
+        DeviceAppRestriction restriction;
+        if (existing.isPresent()) {
+            restriction = existing.get();
+            restriction.setRestricted(restricted);
+            restriction.setAppliedAt(LocalDateTime.now());
+        } else {
+            restriction = DeviceAppRestriction.builder()
+                    .deviceId(deviceId).packageName(packageName).appName(appName)
+                    .installSource(installSource).restricted(restricted)
+                    .appliedAt(LocalDateTime.now()).build();
+        }
+        appRestrictionRepo.save(restriction);
+
+        String employeeName = deviceRepo.findByDeviceId(deviceId)
+                .map(Device::getEmployeeName).orElse("Unknown");
+        String action = restricted ? "APP_RESTRICTED" : "APP_ALLOWED";
+        String desc = restricted
+                ? appName + " restricted on " + employeeName + "'s Device"
+                : appName + " allowed on " + employeeName + "'s Device";
+        String sourceInfo = (installSource != null && !installSource.isBlank())
+                ? " (" + installSource + ")" : "";
+        activityRepo.save(DeviceActivity.builder()
+                .deviceId(deviceId).employeeName(employeeName)
+                .activityType(action).description(desc + sourceInfo)
+                .severity(restricted ? "WARNING" : "INFO").createdAt(LocalDateTime.now()).build());
+        if (restricted) {
+            alertRepo.save(MdmAlert.builder()
+                    .deviceId(deviceId).employeeName(employeeName)
+                    .alertType("APP_RESTRICTED")
+                    .message(appName + sourceInfo + " blocked on " + employeeName + "'s Device")
+                    .isRead(false).severity("WARNING").createdAt(LocalDateTime.now()).build());
+        }
+
+        log.info("{} app {} on device {}", restricted ? "Restricted" : "Allowed", packageName, deviceId);
+        return ResponseEntity.ok(Map.of("message",
+                "App " + (restricted ? "restricted" : "allowed") + " successfully"));
+    }
+
+    @GetMapping("/devices/{deviceId}/restricted-apps")
+    public ResponseEntity<List<DeviceAppRestriction>> getRestrictedApps(@PathVariable String deviceId) {
+        return ResponseEntity.ok(appRestrictionRepo.findByDeviceId(deviceId));
+    }
+
+    // ════════════════════════════════════════
+    // DEVICE POLICIES
+    // ════════════════════════════════════════
+
+    @GetMapping("/devices/{deviceId}/policies")
+    public ResponseEntity<DevicePolicy> getPolicies(@PathVariable String deviceId) {
+        DevicePolicy policy = policyRepo.findByDeviceId(deviceId)
+                .orElse(DevicePolicy.builder()
+                        .deviceId(deviceId).cameraDisabled(false)
+                        .screenLockRequired(false).installBlocked(false)
+                        .uninstallBlocked(false).locationTrackingEnabled(false)
+                        .appliedAt(LocalDateTime.now()).build());
+        return ResponseEntity.ok(policy);
+    }
+
+    @PostMapping("/devices/{deviceId}/policy")
+    public ResponseEntity<?> updatePolicy(@PathVariable String deviceId,
+                                          @RequestBody Map<String, Object> body) {
+        DevicePolicy policy = policyRepo.findByDeviceId(deviceId)
+                .orElse(DevicePolicy.builder().deviceId(deviceId)
+                        .cameraDisabled(false).screenLockRequired(false)
+                        .installBlocked(false).uninstallBlocked(false)
+                        .locationTrackingEnabled(false).build());
+
+        String employeeName = deviceRepo.findByDeviceId(deviceId)
+                .map(Device::getEmployeeName).orElse("Unknown");
+
+        if (body.containsKey("cameraDisabled")) {
+            boolean val = Boolean.parseBoolean(body.get("cameraDisabled").toString());
+            policy.setCameraDisabled(val);
+            String desc = (val ? "Camera disabled" : "Camera enabled")
+                    + " on " + employeeName + "'s Device";
+            activityRepo.save(DeviceActivity.builder()
+                    .deviceId(deviceId).employeeName(employeeName)
+                    .activityType(val ? "CAMERA_DISABLED" : "CAMERA_ENABLED")
+                    .description(desc).severity("WARNING").createdAt(LocalDateTime.now()).build());
+            alertRepo.save(MdmAlert.builder()
+                    .deviceId(deviceId).employeeName(employeeName)
+                    .alertType(val ? "CAMERA_DISABLED" : "CAMERA_ENABLED").message(desc)
+                    .isRead(false).severity("WARNING").createdAt(LocalDateTime.now()).build());
+        }
+        if (body.containsKey("installBlocked"))
+            policy.setInstallBlocked(Boolean.parseBoolean(body.get("installBlocked").toString()));
+        if (body.containsKey("uninstallBlocked"))
+            policy.setUninstallBlocked(Boolean.parseBoolean(body.get("uninstallBlocked").toString()));
+        if (body.containsKey("locationTrackingEnabled"))
+            policy.setLocationTrackingEnabled(
+                    Boolean.parseBoolean(body.get("locationTrackingEnabled").toString()));
+
+        policy.setAppliedAt(LocalDateTime.now());
+        policyRepo.save(policy);
+        return ResponseEntity.ok(Map.of("message", "Policy updated"));
+    }
+
+    // ════════════════════════════════════════
+    // DEVICE COMMANDS (lock, wipe)
+    // ════════════════════════════════════════
+
+    @PostMapping("/devices/{deviceId}/lock")
+    public ResponseEntity<?> lockDevice(@PathVariable String deviceId) {
+        commandRepo.save(DeviceCommand.builder()
+                .deviceId(deviceId).commandType("LOCK")
+                .executed(false).createdAt(LocalDateTime.now()).build());
+        String employeeName = deviceRepo.findByDeviceId(deviceId)
+                .map(Device::getEmployeeName).orElse("Unknown");
+        activityRepo.save(DeviceActivity.builder()
+                .deviceId(deviceId).employeeName(employeeName)
+                .activityType("DEVICE_LOCKED").description(employeeName + "'s Device locked")
+                .severity("WARNING").createdAt(LocalDateTime.now()).build());
+        alertRepo.save(MdmAlert.builder()
+                .deviceId(deviceId).employeeName(employeeName)
+                .alertType("DEVICE_LOCKED").message(employeeName + "'s Device locked remotely")
+                .isRead(false).severity("WARNING").createdAt(LocalDateTime.now()).build());
+        return ResponseEntity.ok(Map.of("message", "Lock command queued"));
+    }
+
+    @PostMapping("/devices/{deviceId}/wipe")
+    public ResponseEntity<?> wipeDevice(@PathVariable String deviceId) {
+        commandRepo.save(DeviceCommand.builder()
+                .deviceId(deviceId).commandType("WIPE")
+                .executed(false).createdAt(LocalDateTime.now()).build());
+        String employeeName = deviceRepo.findByDeviceId(deviceId)
+                .map(Device::getEmployeeName).orElse("Unknown");
+        activityRepo.save(DeviceActivity.builder()
+                .deviceId(deviceId).employeeName(employeeName)
+                .activityType("WIPE_INITIATED").description(employeeName + "'s Device wiped")
+                .severity("CRITICAL").createdAt(LocalDateTime.now()).build());
+        alertRepo.save(MdmAlert.builder()
+                .deviceId(deviceId).employeeName(employeeName)
+                .alertType("WIPE_INITIATED").message(employeeName + "'s Device wipe initiated")
+                .isRead(false).severity("CRITICAL").createdAt(LocalDateTime.now()).build());
+        return ResponseEntity.ok(Map.of("message", "Wipe command queued"));
+    }
+
+    @GetMapping("/devices/{deviceId}/pending-commands")
+    public ResponseEntity<List<DeviceCommand>> getPendingCommands(@PathVariable String deviceId) {
+        return ResponseEntity.ok(
+                commandRepo.findByDeviceIdAndExecutedFalseOrderByCreatedAtAsc(deviceId));
+    }
+
+    @PostMapping("/devices/{deviceId}/commands/{commandId}/ack")
+    public ResponseEntity<?> ackCommand(@PathVariable String deviceId,
+                                        @PathVariable Long commandId) {
+        return commandRepo.findById(commandId).map(cmd -> {
+            cmd.setExecuted(true);
+            cmd.setExecutedAt(LocalDateTime.now());
+            commandRepo.save(cmd);
+            return ResponseEntity.ok(Map.of("message", "Command acknowledged"));
+        }).orElse(ResponseEntity.notFound().build());
+    }
+
+    // ════════════════════════════════════════
+    // GPS LOCATION
+    // ════════════════════════════════════════
+
+    @PostMapping("/devices/{deviceId}/location")
+    public ResponseEntity<?> reportLocation(@PathVariable String deviceId,
+                                            @RequestBody Map<String, Object> body) {
+        Double lat = body.get("latitude") != null
+                ? Double.parseDouble(body.get("latitude").toString()) : null;
+        Double lng = body.get("longitude") != null
+                ? Double.parseDouble(body.get("longitude").toString()) : null;
+        Float accuracy = body.get("accuracy") != null
+                ? Float.parseFloat(body.get("accuracy").toString()) : null;
+        String address = (String) body.getOrDefault("address", "");
+
+        if (lat == null || lng == null)
+            return ResponseEntity.badRequest().body(Map.of("message", "latitude and longitude required"));
+
+        locationRepo.save(DeviceLocation.builder()
+                .deviceId(deviceId).latitude(lat).longitude(lng)
+                .accuracy(accuracy).address(address)
+                .recordedAt(LocalDateTime.now()).build());
+        return ResponseEntity.ok(Map.of("message", "Location recorded"));
+    }
+
+    @GetMapping("/devices/{deviceId}/location")
+    public ResponseEntity<?> getLocation(@PathVariable String deviceId) {
+        return locationRepo.findTopByDeviceIdOrderByRecordedAtDesc(deviceId)
+                .map(loc -> ResponseEntity.ok((Object) loc))
+                .orElse(ResponseEntity.ok(Map.of("message", "No location data")));
+    }
+    @PostMapping("/devices/{deviceId}/sign-out")
+    public ResponseEntity<?> signOutDevice(@PathVariable String deviceId) {
+        // 1. Find the device and set status to OFFLINE
+        Device device = deviceRepo.findByDeviceId(deviceId)
+                .orElseThrow(() -> new RuntimeException("Device not found"));
+        device.setStatus("OFFLINE");
+        deviceRepo.save(device);
+
+        // 2. Log the activity for the Admin Dashboard
+        activityRepo.save(DeviceActivity.builder()
+                .deviceId(deviceId)
+                .employeeName(device.getEmployeeName())
+                .activityType("SIGN_OUT")
+                .description("Employee signed out from the device")
+                .severity("INFO")
+                .createdAt(LocalDateTime.now())
+                .build());
+
+        return ResponseEntity.ok().build();
+    }
+    
 }

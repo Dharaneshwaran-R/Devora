@@ -79,13 +79,18 @@ fun AppNavigation(
             val context = LocalContext.current
             SplashScreen(
                 onSplashFinished = {
+                    val enrollRepo = EnrollmentRepository(context)
                     val dest = when {
+                        // 1. Check if Admin is logged in
                         SessionManager.isLoggedIn(context) -> "dashboard"
-                        AdminReceiver.isDeviceOwner(context) -> {
-                            // Device was provisioned as Device Owner (e.g. after factory reset QR)
-                            val enrollRepo = EnrollmentRepository(context)
-                            if (enrollRepo.isEnrolled()) "employee_dashboard" else "employee_enrollment"
-                        }
+                        
+                        // 2. Check if Employee is already enrolled/logged in
+                        enrollRepo.isEnrolled() -> "employee_dashboard"
+                        
+                        // 3. If Device Owner but not enrolled, go to enrollment
+                        AdminReceiver.isDeviceOwner(context) -> "employee_enrollment"
+                        
+                        // 4. Default to login
                         else -> "login"
                     }
                     navController.navigate(dest) {
@@ -291,5 +296,3 @@ fun AppNavigation(
         }
     }
 }
-
-

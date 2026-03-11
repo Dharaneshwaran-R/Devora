@@ -9,6 +9,7 @@ import retrofit2.http.DELETE
 import retrofit2.http.GET
 import retrofit2.http.POST
 import retrofit2.http.Path
+import retrofit2.http.Query
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import java.util.concurrent.TimeUnit
@@ -98,6 +99,98 @@ data class RestrictedApp(
 data class RestrictAppRequest(
     @SerializedName("packageName") val packageName: String,
     @SerializedName("appName") val appName: String
+)
+
+// ── New DTOs for MDM features ──
+
+data class DeviceAppRestrictionResponse(
+    @SerializedName("id") val id: Long,
+    @SerializedName("deviceId") val deviceId: String,
+    @SerializedName("packageName") val packageName: String,
+    @SerializedName("appName") val appName: String?,
+    @SerializedName("installSource") val installSource: String?,
+    @SerializedName("restricted") val restricted: Boolean,
+    @SerializedName("appliedAt") val appliedAt: String?,
+    @SerializedName("appliedBy") val appliedBy: String?
+)
+
+data class RestrictAppRequestNew(
+    @SerializedName("packageName") val packageName: String,
+    @SerializedName("appName") val appName: String,
+    @SerializedName("installSource") val installSource: String?,
+    @SerializedName("restricted") val restricted: Boolean
+)
+
+data class DeviceActivityResponse(
+    @SerializedName("id") val id: Long,
+    @SerializedName("deviceId") val deviceId: String?,
+    @SerializedName("employeeName") val employeeName: String?,
+    @SerializedName("activityType") val activityType: String?,
+    @SerializedName("description") val description: String?,
+    @SerializedName("severity") val severity: String?,
+    @SerializedName("createdAt") val createdAt: String?
+)
+
+data class MdmAlertResponse(
+    @SerializedName("id") val id: Long,
+    @SerializedName("deviceId") val deviceId: String?,
+    @SerializedName("employeeName") val employeeName: String?,
+    @SerializedName("alertType") val alertType: String?,
+    @SerializedName("message") val message: String?,
+    @SerializedName("isRead") val isRead: Boolean,
+    @SerializedName("severity") val severity: String?,
+    @SerializedName("createdAt") val createdAt: String?
+)
+
+data class DevicePolicyResponse(
+    @SerializedName("id") val id: Long?,
+    @SerializedName("deviceId") val deviceId: String?,
+    @SerializedName("cameraDisabled") val cameraDisabled: Boolean,
+    @SerializedName("screenLockRequired") val screenLockRequired: Boolean,
+    @SerializedName("installBlocked") val installBlocked: Boolean,
+    @SerializedName("uninstallBlocked") val uninstallBlocked: Boolean,
+    @SerializedName("locationTrackingEnabled") val locationTrackingEnabled: Boolean,
+    @SerializedName("appliedAt") val appliedAt: String?
+)
+
+data class PolicyUpdateRequest(
+    @SerializedName("cameraDisabled") val cameraDisabled: Boolean? = null,
+    @SerializedName("installBlocked") val installBlocked: Boolean? = null,
+    @SerializedName("uninstallBlocked") val uninstallBlocked: Boolean? = null,
+    @SerializedName("locationTrackingEnabled") val locationTrackingEnabled: Boolean? = null
+)
+
+data class DeviceLocationResponse(
+    @SerializedName("id") val id: Long?,
+    @SerializedName("deviceId") val deviceId: String?,
+    @SerializedName("latitude") val latitude: Double?,
+    @SerializedName("longitude") val longitude: Double?,
+    @SerializedName("accuracy") val accuracy: Float?,
+    @SerializedName("address") val address: String?,
+    @SerializedName("recordedAt") val recordedAt: String?
+)
+
+data class LocationReportRequest(
+    @SerializedName("latitude") val latitude: Double,
+    @SerializedName("longitude") val longitude: Double,
+    @SerializedName("accuracy") val accuracy: Float
+)
+
+data class DeviceCommandResponse(
+    @SerializedName("id") val id: Long,
+    @SerializedName("deviceId") val deviceId: String?,
+    @SerializedName("commandType") val commandType: String?,
+    @SerializedName("executed") val executed: Boolean,
+    @SerializedName("createdAt") val createdAt: String?,
+    @SerializedName("executedAt") val executedAt: String?
+)
+
+data class UnreadCountResponse(
+    @SerializedName("count") val count: Int
+)
+
+data class MarkAlertsReadRequest(
+    @SerializedName("alertIds") val alertIds: List<Long>
 )
 
 data class DashboardStats(
@@ -224,6 +317,9 @@ interface EnrollmentApiService {
     @POST("api/devices/{deviceId}/heartbeat")
     suspend fun sendHeartbeat(@Path("deviceId") deviceId: String): Response<Unit>
 
+    @POST("api/devices/{deviceId}/sign-out")
+    suspend fun signOutDevice(@Path("deviceId") deviceId: String): Response<Unit>
+
     @GET("api/dashboard/stats")
     suspend fun getDashboardStats(): Response<DashboardStats>
 
@@ -245,19 +341,87 @@ interface EnrollmentApiService {
     @POST("api/devices/{deviceId}/restrict-app")
     suspend fun restrictApp(
         @Path("deviceId") deviceId: String,
-        @Body request: RestrictAppRequest
-    ): Response<Map<String, String>>
-
-    @DELETE("api/devices/{deviceId}/restrict-app/{packageName}")
-    suspend fun unrestrictApp(
-        @Path("deviceId") deviceId: String,
-        @Path("packageName") packageName: String
+        @Body request: RestrictAppRequestNew
     ): Response<Map<String, String>>
 
     @GET("api/devices/{deviceId}/restricted-apps")
     suspend fun getRestrictedApps(
         @Path("deviceId") deviceId: String
-    ): Response<List<RestrictedApp>>
+    ): Response<List<DeviceAppRestrictionResponse>>
+
+    // ── Activities ──
+
+    @GET("api/activities")
+    suspend fun getActivities(
+        @Query("limit") limit: Int = 10
+    ): Response<List<DeviceActivityResponse>>
+
+    @GET("api/devices/{deviceId}/activities")
+    suspend fun getDeviceActivities(
+        @Path("deviceId") deviceId: String
+    ): Response<List<DeviceActivityResponse>>
+
+    // ── Alerts ──
+
+    @GET("api/alerts/unread")
+    suspend fun getUnreadAlerts(): Response<List<MdmAlertResponse>>
+
+    @GET("api/alerts/unread-count")
+    suspend fun getUnreadAlertCount(): Response<UnreadCountResponse>
+
+    @POST("api/alerts/mark-read")
+    suspend fun markAlertsRead(
+        @Body request: MarkAlertsReadRequest
+    ): Response<Map<String, String>>
+
+    // ── Policies ──
+
+    @GET("api/devices/{deviceId}/policies")
+    suspend fun getDevicePolicies(
+        @Path("deviceId") deviceId: String
+    ): Response<DevicePolicyResponse>
+
+    @POST("api/devices/{deviceId}/policy")
+    suspend fun updateDevicePolicy(
+        @Path("deviceId") deviceId: String,
+        @Body request: PolicyUpdateRequest
+    ): Response<DevicePolicyResponse>
+
+    // ── Commands ──
+
+    @POST("api/devices/{deviceId}/lock")
+    suspend fun lockDevice(
+        @Path("deviceId") deviceId: String
+    ): Response<Map<String, String>>
+
+    @POST("api/devices/{deviceId}/wipe")
+    suspend fun wipeDevice(
+        @Path("deviceId") deviceId: String
+    ): Response<Map<String, String>>
+
+    @GET("api/devices/{deviceId}/pending-commands")
+    suspend fun getPendingCommands(
+        @Path("deviceId") deviceId: String
+    ): Response<List<DeviceCommandResponse>>
+
+    @POST("api/devices/{deviceId}/commands/{commandId}/ack")
+    suspend fun ackCommand(
+        @Path("deviceId") deviceId: String,
+        @Path("commandId") commandId: Long
+    ): Response<Map<String, String>>
+
+    // ── Location ──
+
+    @POST("api/devices/{deviceId}/location")
+    suspend fun reportLocation(
+        @Path("deviceId") deviceId: String,
+        @Body request: LocationReportRequest
+    ): Response<Map<String, String>>
+
+    @GET("api/devices/{deviceId}/location")
+    suspend fun getDeviceLocation(
+        @Path("deviceId") deviceId: String
+    ): Response<DeviceLocationResponse>
 }
 
 // ══════════════════════════════════════
