@@ -363,7 +363,7 @@ interface EnrollmentApiService {
         @Query("limit") limit: Int = 10
     ): Response<List<DeviceActivityResponse>>
 
-    @GET("api/devices/{deviceId}/activities")
+    @GET("api/activities/device/{deviceId}")
     suspend fun getDeviceActivities(
         @Path("deviceId") deviceId: String
     ): Response<List<DeviceActivityResponse>>

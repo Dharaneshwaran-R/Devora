@@ -10,14 +10,11 @@ import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -43,9 +40,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.outlined.Info
@@ -55,13 +50,14 @@ import androidx.compose.material.icons.outlined.VerifiedUser
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -78,35 +74,26 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.TextFieldValue
-import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.devora.devicemanager.ui.components.SectionHeader
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.devora.devicemanager.enrollment.EnrollmentViewModel
 import com.devora.devicemanager.ui.theme.DMSans
 import com.devora.devicemanager.ui.theme.JetBrainsMono
 import com.devora.devicemanager.ui.theme.PlusJakartaSans
 import com.devora.devicemanager.ui.theme.PurpleCore
 import com.devora.devicemanager.ui.theme.PurpleDeep
-import com.devora.devicemanager.ui.theme.Success
-import com.devora.devicemanager.enrollment.EnrollmentStatus
-import com.devora.devicemanager.enrollment.EnrollmentViewModel
-import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
-import androidx.compose.ui.viewinterop.AndroidView
-import androidx.core.content.ContextCompat
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 // ══════════════════════════════════════
 // EMPLOYEE ENROLLMENT SCREEN
@@ -153,19 +140,18 @@ fun EmployeeEnrollmentScreen(
     // Sync the ViewModel's step index to the local enrollStep for unchanged UI rendering
     enrollStep = enrollmentState.stepIndex
 
+    // FIX 1: Directly navigate to Employee Dashboard on success (step 5)
+    // NO success screen at all
+    LaunchedEffect(enrollStep) {
+        if (enrollStep == 5) {
+            onEnrollSuccess()
+        }
+    }
+
     // Show error messages from the ViewModel
     if (enrollmentState.errorMessage != null) {
         LaunchedEffect(enrollmentState.errorMessage) {
             snackbarHostState.showSnackbar(enrollmentState.errorMessage ?: "Enrollment error")
-        }
-    }
-
-    fun startEnrollment() {
-        if (tokenInput.text.isNotEmpty()) {
-            enrollmentVm.onTokenChanged(tokenInput.text)
-            enrollmentVm.enrollWithToken()
-        } else {
-            enrollmentVm.simulateQrScan()
         }
     }
 
@@ -891,173 +877,6 @@ fun EmployeeEnrollmentScreen(
 
                         Spacer(Modifier.height(4.dp))
                     }
-                }
-            }
-
-            // ══════════════════════════════════════
-            // SUCCESS STATE (step 5)
-            // ══════════════════════════════════════
-
-            if (enrollStep == 5) {
-
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Spacer(Modifier.height(24.dp))
-
-                    // Animated success circle
-                    val scaleAnim by animateFloatAsState(
-                        targetValue = 1f,
-                        animationSpec = spring(
-                            dampingRatio = Spring.DampingRatioMediumBouncy,
-                            stiffness = Spring.StiffnessLow
-                        ),
-                        label = "successScale"
-                    )
-
-                    Box(
-                        modifier = Modifier
-                            .size(100.dp)
-                            .scale(scaleAnim)
-                            .clip(CircleShape)
-                            .background(
-                                Brush.linearGradient(listOf(PurpleCore, PurpleDeep))
-                            ),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            Icons.Filled.CheckCircle,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(52.dp)
-                        )
-                    }
-
-                    Spacer(Modifier.height(20.dp))
-
-                    Text(
-                        "Device Enrolled!",
-                        fontFamily = PlusJakartaSans,
-                        fontWeight = FontWeight.ExtraBold,
-                        fontSize = 26.sp,
-                        color = TextWhite
-                    )
-
-                    Spacer(Modifier.height(8.dp))
-
-                    Text(
-                        "Welcome to Devora MDM",
-                        fontFamily = DMSans,
-                        fontSize = 14.sp,
-                        color = TextSub
-                    )
-
-                    Spacer(Modifier.height(24.dp))
-
-                    // Enrollment summary card
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(DarkSurface)
-                            .border(1.dp, Color(0x337B61FF), RoundedCornerShape(16.dp))
-                            .padding(20.dp)
-                    ) {
-                        Column {
-                            SectionHeader(title = "ENROLLMENT DETAILS", isDark = true)
-                            Spacer(Modifier.height(12.dp))
-
-                            val dateFormat = remember {
-                                SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault())
-                            }
-
-                            // Build the enrollment details list, including employee info if available
-                            val enrollmentDetails = buildList {
-                                if (!enrollmentState.employeeName.isNullOrEmpty()) {
-                                    add("Employee Name" to enrollmentState.employeeName!!)
-                                }
-                                if (!enrollmentState.employeeId.isNullOrEmpty()) {
-                                    add("Employee ID" to enrollmentState.employeeId!!)
-                                }
-                                add("Device" to Build.MODEL)
-                                add("Manufacturer" to Build.MANUFACTURER)
-                                add("Enrolled" to dateFormat.format(Date()))
-                                add("Server" to "Connected ✓")
-                                add("Policy" to "Enterprise Standard")
-                            }
-
-                            enrollmentDetails.forEach { (label, value) ->
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(vertical = 8.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        label,
-                                        fontFamily = DMSans,
-                                        fontSize = 13.sp,
-                                        color = TextSub
-                                    )
-                                    Text(
-                                        value,
-                                        fontFamily = JetBrainsMono,
-                                        fontSize = 13.sp,
-                                        color = if (label == "Server") Success else TextWhite,
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                }
-                                if (label != "Policy") {
-                                    HorizontalDivider(color = Color(0x1AFFFFFF), thickness = 1.dp)
-                                }
-                            }
-                        }
-                    }
-
-                    Spacer(Modifier.height(24.dp))
-
-                    // Open dashboard button
-                    Button(
-                        onClick = onEnrollSuccess,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(52.dp),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Purple),
-                        elevation = ButtonDefaults.buttonElevation(0.dp)
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                "Open Employee Dashboard",
-                                fontFamily = PlusJakartaSans,
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 15.sp,
-                                color = Color.White
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            Icon(
-                                Icons.AutoMirrored.Filled.ArrowForward,
-                                contentDescription = null,
-                                tint = Color.White,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                    }
-
-                    Spacer(Modifier.height(12.dp))
-
-                    Text(
-                        "Your IT team can now manage this device",
-                        fontFamily = DMSans,
-                        fontSize = 11.sp,
-                        color = TextDim,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    Spacer(Modifier.height(24.dp))
                 }
             }
         }

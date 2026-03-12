@@ -244,8 +244,9 @@ fun AppNavigation(
             EmployeeEnrollmentScreen(
                 onEnrollSuccess = {
                     authViewModel.loginEmployee()
+                    // FIX 1: Direct navigation to employee dashboard, inclusive of enrollment
                     navController.navigate("employee_dashboard") {
-                        popUpTo("login") { inclusive = true }
+                        popUpTo("employee_enrollment") { inclusive = true }
                         launchSingleTop = true
                     }
                 },

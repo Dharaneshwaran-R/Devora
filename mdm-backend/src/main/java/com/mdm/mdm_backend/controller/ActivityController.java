@@ -6,6 +6,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import java.util.List;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api")
@@ -18,12 +19,17 @@ public class ActivityController {
     public ResponseEntity<List<DeviceActivity>> getActivities(
             @RequestParam(defaultValue = "10") int limit) {
         List<DeviceActivity> all = activityRepository.findAllByOrderByCreatedAtDesc();
-        List<DeviceActivity> result = all.size() > limit ? all.subList(0, limit) : all;
+        List<DeviceActivity> result = all.stream().limit(limit).collect(Collectors.toList());
         return ResponseEntity.ok(result);
     }
 
-    @GetMapping("/devices/{deviceId}/activities")
+    @GetMapping("/activities/device/{deviceId}")
     public ResponseEntity<List<DeviceActivity>> getDeviceActivities(@PathVariable String deviceId) {
-        return ResponseEntity.ok(activityRepository.findByDeviceIdOrderByCreatedAtDesc(deviceId));
+        List<DeviceActivity> activities = activityRepository.findByDeviceIdOrderByCreatedAtDesc(deviceId);
+        return ResponseEntity.ok(
+            activities.stream()
+                .limit(10)
+                .collect(Collectors.toList())
+        );
     }
 }

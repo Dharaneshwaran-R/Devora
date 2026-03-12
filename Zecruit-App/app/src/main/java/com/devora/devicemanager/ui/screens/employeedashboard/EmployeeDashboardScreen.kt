@@ -1,7 +1,10 @@
 package com.devora.devicemanager.ui.screens.employeedashboard
 
+import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.widget.Toast
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -23,6 +26,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -73,7 +78,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.devora.devicemanager.collector.DeviceInfoCollector
+import com.devora.devicemanager.network.DeviceActivityResponse
 import com.devora.devicemanager.network.RetrofitClient
 import com.devora.devicemanager.session.SessionManager
 import com.devora.devicemanager.ui.components.DevoraCard
@@ -95,11 +104,19 @@ import com.devora.devicemanager.ui.theme.Success
 import com.devora.devicemanager.ui.theme.TextMuted
 import com.devora.devicemanager.ui.theme.TextPrimary
 import com.devora.devicemanager.ui.theme.Warning
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+
+// Internal activity data class for unified UI
+private data class UIActivity(
+    val icon: String,
+    val description: String,
+    val timestamp: Long,
+    val createdAtStr: String? = null
+)
 
 @Composable
 fun EmployeeDashboardScreen(
@@ -116,6 +133,93 @@ fun EmployeeDashboardScreen(
     var showSignOutDialog by remember { mutableStateOf(false) }
     var checkTick by remember { mutableIntStateOf(0) }
     val latestOnEnrollmentRevoked by rememberUpdatedState(onEnrollmentRevoked)
+
+    // FIX 2: Get real employee name from SessionManager
+    val employeePrefs = remember { context.getSharedPreferences("devora_enrollment", Context.MODE_PRIVATE) }
+    val employeeName = remember { employeePrefs.getString("employee_name", "Employee") ?: "Employee" }
+    val displayFirstName = employeeName.substringBefore(" ")
+    val avatarInitial = employeeName.firstOrNull()?.uppercaseChar() ?: 'E'
+
+    // FIX 3: Activities state
+    var activities by remember { mutableStateOf<List<UIActivity>>(emptyList()) }
+
+    fun getTimeAgo(timestamp: Long): String {
+        val diff = System.currentTimeMillis() - timestamp
+        return when {
+            diff < 60_000 -> "Just now"
+            diff < 3_600_000 -> "${diff / 60_000} min ago"
+            diff < 86_400_000 -> "${diff / 3_600_000} hr ago"
+            else -> "${diff / 86_400_000} day ago"
+        }
+    }
+
+    fun parseISO(dateStr: String?): Long {
+        if (dateStr == null) return System.currentTimeMillis()
+        return try {
+            val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS", Locale.getDefault())
+            sdf.parse(dateStr)?.time ?: System.currentTimeMillis()
+        } catch (e: Exception) {
+            try {
+                val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.getDefault())
+                sdf.parse(dateStr)?.time ?: System.currentTimeMillis()
+            } catch (e2: Exception) {
+                System.currentTimeMillis()
+            }
+        }
+    }
+
+    suspend fun loadActivities() {
+        val list = mutableListOf<UIActivity>()
+
+        // 1. Fetch from Backend
+        try {
+            val response = RetrofitClient.api.getDeviceActivities(deviceInfo.deviceId)
+            if (response.isSuccessful) {
+                response.body()?.forEach { res ->
+                    val icon = when (res.activityType) {
+                        "ENROLLED" -> "✅"
+                        "APP_RESTRICTED" -> "🚫"
+                        "DEVICE_LOCKED" -> "🔒"
+                        "CAMERA_DISABLED" -> "📷"
+                        "APP_INSTALLED" -> "📲"
+                        "LOCATION_UPDATED" -> "📍"
+                        else -> "ℹ️"
+                    }
+                    list.add(UIActivity(icon, res.description ?: "", parseISO(res.createdAt), res.createdAt))
+                }
+            }
+        } catch (e: Exception) {
+            // Backend failed, fallback to local only
+        }
+
+        // 2. Local App Detection
+        try {
+            val pm = context.packageManager
+            val installedApps = pm.getInstalledPackages(0)
+            val enrolledAt = employeePrefs.getLong("enrolled_at", 0L)
+            
+            // Just for demonstration if not enrolled today, use some recent time
+            val compareTime = if (enrolledAt > 0) enrolledAt else System.currentTimeMillis() - 86400000
+
+            installedApps.filter { pkg ->
+                val appInfo = pkg.applicationInfo
+                pkg.firstInstallTime > compareTime && 
+                appInfo != null &&
+                (appInfo.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) == 0
+            }.forEach { pkg ->
+                val appName = pkg.applicationInfo?.loadLabel(pm)?.toString() ?: "Unknown App"
+                list.add(UIActivity("📲", "$appName installed", pkg.firstInstallTime))
+            }
+
+            // Enrollment activity if just enrolled
+            if (enrolledAt > (System.currentTimeMillis() - 3600000)) {
+                list.add(UIActivity("✅", "Device enrolled in DEVORA MDM", enrolledAt))
+            }
+
+        } catch (e: Exception) { }
+
+        activities = list.sortedByDescending { it.timestamp }.take(10)
+    }
 
     suspend fun verifyDeviceStillActive() {
         try {
@@ -135,6 +239,7 @@ fun EmployeeDashboardScreen(
     }
 
     LaunchedEffect(Unit) {
+        loadActivities()
         while (true) {
             verifyDeviceStillActive()
             delay(30_000)
@@ -144,6 +249,7 @@ fun EmployeeDashboardScreen(
     LaunchedEffect(checkTick) {
         if (checkTick > 0) {
             verifyDeviceStillActive()
+            loadActivities()
         }
     }
 
@@ -233,7 +339,7 @@ fun EmployeeDashboardScreen(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            "Hi, Employee!",
+                            "Hi, $displayFirstName!",
                             fontFamily = PlusJakartaSans,
                             fontWeight = FontWeight.Bold,
                             fontSize = 20.sp,
@@ -286,7 +392,7 @@ fun EmployeeDashboardScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            "E",
+                            avatarInitial.toString(),
                             fontFamily = PlusJakartaSans,
                             fontWeight = FontWeight.ExtraBold,
                             fontSize = 22.sp,
@@ -616,10 +722,8 @@ fun EmployeeDashboardScreen(
 
             Spacer(Modifier.height(8.dp))
 
-            val myActivities = emptyList<Triple<String, String, Color>>()
-
             DevoraCard(isDark = isDark) {
-                if (myActivities.isEmpty()) {
+                if (activities.isEmpty()) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -643,43 +747,44 @@ fun EmployeeDashboardScreen(
                         }
                     }
                 } else {
-                Column {
-                    myActivities.forEachIndexed { index, (event, time, color) ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .clip(CircleShape)
-                                .background(color)
-                        )
-                        Spacer(Modifier.width(12.dp))
-                        Text(
-                            event,
-                            fontFamily = DMSans,
-                            fontSize = 13.sp,
-                            color = textColor,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Text(
-                            time,
-                            fontFamily = JetBrainsMono,
-                            fontSize = 10.sp,
-                            color = TextMuted
-                        )
+                    Column {
+                        activities.forEachIndexed { index, activity ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 12.dp),
+                                verticalAlignment = Alignment.Top
+                            ) {
+                                Text(
+                                    text = activity.icon,
+                                    fontSize = 18.sp,
+                                    modifier = Modifier.padding(top = 2.dp)
+                                )
+                                Spacer(Modifier.width(12.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = activity.description,
+                                        fontFamily = DMSans,
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = textColor
+                                    )
+                                    Text(
+                                        text = getTimeAgo(activity.timestamp),
+                                        fontFamily = JetBrainsMono,
+                                        fontSize = 11.sp,
+                                        color = TextMuted
+                                    )
+                                }
+                            }
+                            if (index < activities.size - 1) {
+                                HorizontalDivider(
+                                    color = PurpleCore.copy(alpha = 0.08f),
+                                    thickness = 1.dp
+                                )
+                            }
+                        }
                     }
-                    if (index < myActivities.size - 1) {
-                        HorizontalDivider(
-                            color = PurpleCore.copy(alpha = 0.08f),
-                            thickness = 1.dp
-                        )
-                    }
-                    }
-                }
                 }
             }
 

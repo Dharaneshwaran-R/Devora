@@ -49,7 +49,7 @@ object DeviceIdentifierStrategy {
 
     private data class FieldResult(val value: String?, val restricted: Boolean)
 
-    @SuppressLint("HardwareIds")
+    @SuppressLint("HardwareIds", "MissingPermission")
     private fun collectSerial(context: Context): FieldResult {
         // Device Owner can always read serial on API 26+
         if (isDeviceOwner(context)) {
@@ -94,7 +94,7 @@ object DeviceIdentifierStrategy {
 
     // ── IMEI ───────────────────────────────────────────────────
 
-    @SuppressLint("HardwareIds")
+    @SuppressLint("HardwareIds", "MissingPermission")
     private fun collectImei(context: Context): FieldResult {
         // IMEI requires API 26+ and Device Owner on API 29+
         val tm = context.getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager
