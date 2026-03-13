@@ -50,8 +50,12 @@ object RemoteDataSource {
 
     suspend fun getActiveEnrollments() = RetrofitClient.api.getActiveEnrollments()
 
+    suspend fun revokeEnrollmentToken(tokenId: Long) = RetrofitClient.api.revokeEnrollmentToken(tokenId)
+
     suspend fun generateEnrollmentToken(request: GenerateEnrollmentTokenRequest) =
         RetrofitClient.api.generateEnrollmentToken(request)
+
+    suspend fun deleteActivity(activityId: Long) = RetrofitClient.api.deleteActivity(activityId)
 
     suspend fun uploadDeviceInfo(request: DeviceInfoRequest) =
         RetrofitClient.api.uploadDeviceInfo(request)

@@ -21,6 +21,7 @@ class DashboardViewModel(
 
     private val _uiState = MutableStateFlow(DashboardUiState())
     val uiState: StateFlow<DashboardUiState> = _uiState.asStateFlow()
+    private val dismissedActivityIds = mutableSetOf<Long>()
 
     init {
         refreshStats()
@@ -38,8 +39,22 @@ class DashboardViewModel(
         viewModelScope.launch {
             while (true) {
                 val activities = repository.fetchRecentActivities(limit = 10)
-                _uiState.value = _uiState.value.copy(recentActivities = activities)
+                _uiState.value = _uiState.value.copy(
+                    recentActivities = activities.filterNot { dismissedActivityIds.contains(it.id) }
+                )
                 delay(120_000L)
+            }
+        }
+    }
+
+    fun dismissActivity(activityId: Long) {
+        viewModelScope.launch {
+            val deleted = repository.deleteActivity(activityId)
+            if (deleted) {
+                dismissedActivityIds.add(activityId)
+                _uiState.value = _uiState.value.copy(
+                    recentActivities = _uiState.value.recentActivities.filterNot { it.id == activityId }
+                )
             }
         }
     }

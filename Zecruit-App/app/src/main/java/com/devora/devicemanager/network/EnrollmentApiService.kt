@@ -340,6 +340,12 @@ interface EnrollmentApiService {
     @GET("api/enrollment/active")
     suspend fun getActiveEnrollments(): Response<List<EnrollmentTokenResponse>>
 
+    @DELETE("api/enrollment/{tokenId}")
+    suspend fun revokeEnrollmentToken(@Path("tokenId") tokenId: Long): Response<Map<String, String>>
+
+    @DELETE("api/activities/{activityId}")
+    suspend fun deleteActivity(@Path("activityId") activityId: Long): Response<Unit>
+
     @POST("api/devices/{deviceId}/restrict-app")
     suspend fun restrictApp(
         @Path("deviceId") deviceId: String,

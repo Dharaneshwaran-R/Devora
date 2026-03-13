@@ -37,7 +37,10 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -102,6 +105,7 @@ private data class Stat(
 // ══════════════════════════════════════
 
 private data class Activity(
+    val id: Long,
     val description: String,
     val device: String,
     val time: String,
@@ -436,6 +440,7 @@ fun DashboardScreen(
                     DevoraCard(isDark = isDark) {
                         val activities = recentActivities.map { a ->
                             Activity(
+                                id = a.id,
                                 description = a.description ?: "Unknown activity",
                                 device = if (!a.deviceId.isNullOrBlank()) "Device ···${a.deviceId!!.takeLast(6)}" else "",
                                 time = getTimeAgo(a.createdAt, currentTime),
@@ -473,42 +478,77 @@ fun DashboardScreen(
                         } else {
                             Column {
                                 activities.forEachIndexed { index, activity ->
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(vertical = 10.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    val dismissState = rememberSwipeToDismissBoxState(
+                                        confirmValueChange = { dismissValue ->
+                                            if (dismissValue == SwipeToDismissBoxValue.StartToEnd) {
+                                                dashboardViewModel.dismissActivity(activity.id)
+                                                true
+                                            } else {
+                                                false
+                                            }
+                                        }
+                                    )
+
+                                    SwipeToDismissBox(
+                                        state = dismissState,
+                                        enableDismissFromEndToStart = false,
+                                        backgroundContent = {
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .heightIn(min = 64.dp)
+                                                    .clip(RoundedCornerShape(10.dp))
+                                                    .background(Danger.copy(alpha = 0.14f))
+                                                    .padding(horizontal = 12.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = "Release to delete",
+                                                    fontFamily = DMSans,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    fontSize = 12.sp,
+                                                    color = Danger
+                                                )
+                                            }
+                                        }
                                     ) {
-                                        Box(
+                                        Row(
                                             modifier = Modifier
-                                                .size(8.dp)
-                                                .background(activity.color, CircleShape)
-                                        )
-                                        Spacer(modifier = Modifier.width(12.dp))
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(
-                                                text = activity.description,
-                                                fontFamily = DMSans,
-                                                fontWeight = FontWeight.Normal,
-                                                fontSize = 13.sp,
-                                                color = textColor
+                                                .fillMaxWidth()
+                                                .padding(vertical = 10.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(8.dp)
+                                                    .background(activity.color, CircleShape)
                                             )
+                                            Spacer(modifier = Modifier.width(12.dp))
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(
+                                                    text = activity.description,
+                                                    fontFamily = DMSans,
+                                                    fontWeight = FontWeight.Normal,
+                                                    fontSize = 13.sp,
+                                                    color = textColor
+                                                )
+                                                Text(
+                                                    text = activity.device,
+                                                    fontFamily = DMSans,
+                                                    fontWeight = FontWeight.Normal,
+                                                    fontSize = 12.sp,
+                                                    color = TextMuted
+                                                )
+                                            }
                                             Text(
-                                                text = activity.device,
-                                                fontFamily = DMSans,
+                                                text = activity.time,
+                                                fontFamily = JetBrainsMono,
                                                 fontWeight = FontWeight.Normal,
-                                                fontSize = 12.sp,
+                                                fontSize = 10.sp,
                                                 color = TextMuted
                                             )
                                         }
-                                        Text(
-                                            text = activity.time,
-                                            fontFamily = JetBrainsMono,
-                                            fontWeight = FontWeight.Normal,
-                                            fontSize = 10.sp,
-                                            color = TextMuted
-                                        )
                                     }
                                     if (index < activities.size - 1) {
                                         HorizontalDivider(

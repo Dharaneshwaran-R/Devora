@@ -12,7 +12,6 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -55,8 +54,7 @@ public class EnrollmentController {
                         .manufacturer(device.getManufacturer())
                         .enrolledAt(device.getEnrolledAt())
                         .status(device.getStatus())
-                        .build()
-        );
+                        .build());
     }
 
     /**
@@ -67,22 +65,28 @@ public class EnrollmentController {
     @PostMapping("/enrollment/generate")
     public ResponseEntity<Map<String, Object>> generateToken(@Valid @RequestBody EnrollmentRequest request) {
         String token = generateDevToken();
-        LocalDateTime expiresAt = LocalDateTime.now().plusHours(24);
 
         // Persist token with employee details and expiry
         EnrollmentToken enrollmentToken = enrollmentService.generateEnrollmentToken(
                 token,
                 request.getEmployeeId(),
-                request.getEmployeeName()
-        );
+                request.getEmployeeName());
 
         return ResponseEntity.ok(Map.of(
                 "token", token,
                 "employeeId", request.getEmployeeId(),
                 "employeeName", request.getEmployeeName(),
-                "expiresAt", expiresAt,
-                "status", "PENDING"
-        ));
+                "expiresAt", enrollmentToken.getExpiresAt(),
+                "status", "PENDING"));
+    }
+
+    @DeleteMapping("/enrollment/{tokenId}")
+    public ResponseEntity<Map<String, String>> revokeEnrollment(@PathVariable Long tokenId) {
+        boolean revoked = enrollmentService.revokeEnrollmentToken(tokenId);
+        if (!revoked) {
+            return ResponseEntity.status(404).body(Map.of("message", "Enrollment token not found"));
+        }
+        return ResponseEntity.ok(Map.of("message", "Enrollment token revoked"));
     }
 
     @GetMapping("/enrollment/active")

@@ -56,7 +56,7 @@ public class EnrollmentService {
 
     public EnrollmentToken generateEnrollmentToken(String token, String employeeId, String employeeName) {
         LocalDateTime now = LocalDateTime.now();
-        LocalDateTime expiresAt = now.plusHours(6);
+        LocalDateTime expiresAt = now.plusHours(1);
 
         EnrollmentToken enrollmentToken = EnrollmentToken.builder()
                 .token(token)
@@ -70,6 +70,21 @@ public class EnrollmentService {
         log.info("Generated enrollment token for employee: {} ({})", employeeName, employeeId);
         upsertEmployee(employeeId, employeeName, null, null);
         return enrollmentTokenRepository.save(enrollmentToken);
+    }
+
+    @Transactional
+    public boolean revokeEnrollmentToken(Long tokenId) {
+        Optional<EnrollmentToken> tokenOptional = enrollmentTokenRepository.findById(tokenId);
+        if (tokenOptional.isEmpty()) {
+            log.warn("Enrollment token not found for revoke: {}", tokenId);
+            return false;
+        }
+
+        EnrollmentToken token = tokenOptional.get();
+        token.setStatus("REVOKED");
+        enrollmentTokenRepository.save(token);
+        log.info("Revoked enrollment token id={} token={}", tokenId, token.getToken());
+        return true;
     }
 
     public Optional<EnrollmentToken> getEnrollmentToken(String token) {
@@ -144,7 +159,8 @@ public class EnrollmentService {
 
         // Log enrollment activity and alert
         String eName = employeeName != null ? employeeName : "Unknown";
-        String model = device.getDeviceModel() != null ? device.getDeviceModel() : request.getDeviceId().substring(0, 8);
+        String model = device.getDeviceModel() != null ? device.getDeviceModel()
+                : request.getDeviceId().substring(0, 8);
         activityRepository.save(DeviceActivity.builder()
                 .deviceId(request.getDeviceId()).employeeName(eName)
                 .activityType("ENROLLED").description(eName + " enrolled " + model)
@@ -189,8 +205,10 @@ public class EnrollmentService {
         List<DeviceInfo> infoList = deviceInfoRepository.findByDeviceIdOrderByCollectedAtDesc(device.getDeviceId());
         if (!infoList.isEmpty()) {
             DeviceInfo latest = infoList.get(0);
-            if (model == null || model.isBlank()) model = latest.getModel();
-            if (manufacturer == null || manufacturer.isBlank()) manufacturer = latest.getManufacturer();
+            if (model == null || model.isBlank())
+                model = latest.getModel();
+            if (manufacturer == null || manufacturer.isBlank())
+                manufacturer = latest.getManufacturer();
             osVersion = latest.getOsVersion();
             sdkVersion = latest.getSdkVersion();
             serialNumber = latest.getSerialNumber();
@@ -302,8 +320,7 @@ public class EnrollmentService {
     public List<EnrollmentToken> getActiveEnrollmentTokens() {
         return enrollmentTokenRepository.findByStatusAndExpiresAtAfterOrderByCreatedAtDesc(
                 "PENDING",
-                LocalDateTime.now()
-        );
+                LocalDateTime.now());
     }
 
     private void upsertEmployee(String employeeId, String employeeName, String deviceId, String deviceName) {

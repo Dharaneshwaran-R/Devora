@@ -28,7 +28,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
@@ -86,6 +85,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.devora.devicemanager.ui.components.DevoraCard
+import com.devora.devicemanager.ui.components.DevoraBottomNav
 import com.devora.devicemanager.ui.components.SectionHeader
 import com.devora.devicemanager.ui.components.StatusBadge
 import com.devora.devicemanager.ui.theme.BgBase
@@ -125,7 +125,8 @@ data class EnrollmentSession(
     val validityHours: Int,
     val createdAt: Long,
     val expiresAt: Long,
-    val status: String
+    val status: String,
+    val deviceId: String?
 )
 
 private fun getExpiryDisplay(
@@ -134,15 +135,7 @@ private fun getExpiryDisplay(
 ): Triple<String, Color, Boolean> {
     val diff = expiresAt - currentTick
     return if (diff <= 0) {
-        val expiredAgo = currentTick - expiresAt
-        val expiredText = when {
-            expiredAgo < 3_600_000L -> "Expired ${expiredAgo / 60_000L}m ago"
-            expiredAgo < 86_400_000L ->
-                "Expired ${expiredAgo / 3_600_000L}h " +
-                    "${(expiredAgo % 3_600_000L) / 60_000L}m ago"
-            else -> "Expired ${expiredAgo / 86_400_000L}d ago"
-        }
-        Triple(expiredText, Color(0xFFF44336), false)
+        Triple("Expired", Color(0xFFF44336), false)
     } else {
         val hours = diff / 3_600_000L
         val minutes = (diff % 3_600_000L) / 60_000L
@@ -170,7 +163,7 @@ private fun getExpiryDisplay(
 
 @Composable
 fun AdminGenerateEnrollmentScreen(
-    onBack: () -> Unit,
+    onNavigate: (String) -> Unit,
     isDark: Boolean
 ) {
     var screenState by remember { mutableStateOf("FORM") }
@@ -179,7 +172,7 @@ fun AdminGenerateEnrollmentScreen(
     var employeeName by remember { mutableStateOf("") }
     var selectedDepartment by remember { mutableStateOf("") }
     var selectedDeviceType by remember { mutableStateOf("") }
-    var selectedValidity by remember { mutableStateOf("24h") }
+    val selectedValidity = "1h"
     var enrollType by remember { mutableStateOf("QR") }
     var isGenerating by remember { mutableStateOf(false) }
     var generatedToken by remember { mutableStateOf("") }
@@ -192,6 +185,7 @@ fun AdminGenerateEnrollmentScreen(
     var isLoadingSessions by remember { mutableStateOf(false) }
     var sessionsError by remember { mutableStateOf<String?>(null) }
     var sessionsRefreshTick by remember { mutableStateOf(0) }
+    val locallyRevokedIds = remember { mutableStateListOf<String>() }
 
     // Tick trigger for expiry countdown updates
     var tickTrigger by remember { mutableLongStateOf(System.currentTimeMillis()) }
@@ -202,9 +196,6 @@ fun AdminGenerateEnrollmentScreen(
         }
     }
 
-    // Wi-Fi config for Device Owner provisioning QR
-    var wifiSsid by remember { mutableStateOf("") }
-    var wifiPassword by remember { mutableStateOf("") }
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
@@ -214,12 +205,7 @@ fun AdminGenerateEnrollmentScreen(
 
     val activeEnrollments = remember { mutableStateListOf<EnrollmentSession>() }
 
-    val visibleEnrollments = remember(activeEnrollments, tickTrigger) {
-        activeEnrollments.filter { session ->
-            val diff = session.expiresAt - tickTrigger
-            diff > -3_600_000L // keep shown until 1 hour after expiry
-        }
-    }
+    val visibleEnrollments = activeEnrollments.filterNot { locallyRevokedIds.contains(it.id) }
 
     LaunchedEffect(sessionsRefreshTick) {
         isLoadingSessions = true
@@ -242,6 +228,13 @@ fun AdminGenerateEnrollmentScreen(
 
     Scaffold(
         containerColor = if (isDark) DarkBgBase else BgBase,
+        bottomBar = {
+            DevoraBottomNav(
+                currentRoute = "admin_generate_enrollment",
+                onNavigate = onNavigate,
+                isDark = isDark
+            )
+        },
         snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { padding ->
         LazyColumn(
@@ -258,14 +251,6 @@ fun AdminGenerateEnrollmentScreen(
                         .padding(top = 16.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    IconButton(onClick = onBack) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back",
-                            tint = PurpleCore,
-                            modifier = Modifier.size(24.dp)
-                        )
-                    }
                     Spacer(Modifier.weight(1f))
                     Text(
                         text = if (screenState == "FORM") "New Enrollment" else "Enrollment Created",
@@ -284,8 +269,6 @@ fun AdminGenerateEnrollmentScreen(
                             selectedDepartment = ""
                             selectedDeviceType = ""
                             generatedToken = ""
-                            wifiSsid = ""
-                            wifiPassword = ""
                             showPayload = false
                         }) {
                             Icon(Icons.Outlined.Add, tint = PurpleCore, contentDescription = "New", modifier = Modifier.size(24.dp))
@@ -396,52 +379,6 @@ fun AdminGenerateEnrollmentScreen(
                                 }
                                 Spacer(Modifier.height(8.dp))
                             }
-
-                            Spacer(Modifier.height(12.dp))
-
-                            // Wi-Fi SSID (for Device Owner provisioning)
-                            Text("Wi-Fi SSID (for factory reset provisioning)", fontFamily = DMSans, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = PurpleCore)
-                            Spacer(Modifier.height(6.dp))
-                            BasicTextField(
-                                value = wifiSsid,
-                                onValueChange = { wifiSsid = it },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(inputBg)
-                                    .padding(14.dp),
-                                textStyle = TextStyle(fontFamily = DMSans, fontSize = 14.sp, color = textColor),
-                                singleLine = true,
-                                decorationBox = { inner ->
-                                    if (wifiSsid.isEmpty()) {
-                                        Text("Enter Wi-Fi network name", fontFamily = DMSans, fontSize = 14.sp, color = TextMuted)
-                                    }
-                                    inner()
-                                }
-                            )
-
-                            Spacer(Modifier.height(12.dp))
-
-                            // Wi-Fi Password
-                            Text("Wi-Fi Password", fontFamily = DMSans, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = PurpleCore)
-                            Spacer(Modifier.height(6.dp))
-                            BasicTextField(
-                                value = wifiPassword,
-                                onValueChange = { wifiPassword = it },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(inputBg)
-                                    .padding(14.dp),
-                                textStyle = TextStyle(fontFamily = DMSans, fontSize = 14.sp, color = textColor),
-                                singleLine = true,
-                                decorationBox = { inner ->
-                                    if (wifiPassword.isEmpty()) {
-                                        Text("Enter Wi-Fi password", fontFamily = DMSans, fontSize = 14.sp, color = TextMuted)
-                                    }
-                                    inner()
-                                }
-                            )
                         }
                     }
                 }
@@ -648,10 +585,8 @@ fun AdminGenerateEnrollmentScreen(
                             Spacer(Modifier.height(16.dp))
 
                             // Device Owner provisioning QR with full payload for auto-install
-                            val qrBitmap: Bitmap? = remember(generatedToken, wifiSsid, wifiPassword) {
+                            val qrBitmap: Bitmap? = remember(generatedToken) {
                                 QrProvisioningHelper.generateDeviceOwnerProvisioningQr(
-                                    wifiSsid = wifiSsid.ifBlank { null },
-                                    wifiPassword = wifiPassword.ifBlank { null },
                                     enrollmentToken = generatedToken
                                 )
                             }
@@ -874,8 +809,6 @@ fun AdminGenerateEnrollmentScreen(
                             Spacer(Modifier.height(8.dp))
 
                             val jsonPayload = QrProvisioningHelper.buildProvisioningPayload(
-                                wifiSsid = wifiSsid.ifBlank { null },
-                                wifiPassword = wifiPassword.ifBlank { null },
                                 enrollmentToken = generatedToken
                             )
 
@@ -1015,7 +948,7 @@ fun AdminGenerateEnrollmentScreen(
             shape = RoundedCornerShape(20.dp),
             title = {
                 Text(
-                    "Delete Device & Revoke?",
+                    "Revoke Enrollment Session?",
                     fontFamily = PlusJakartaSans,
                     fontWeight = FontWeight.Bold,
                     fontSize = 18.sp,
@@ -1024,7 +957,7 @@ fun AdminGenerateEnrollmentScreen(
             },
             text = {
                 Text(
-                    "This will permanently delete the device and all associated employee data. They can re-enroll from step 1.",
+                    "This token will immediately expire and can no longer be used for enrollment.",
                     fontFamily = DMSans,
                     fontSize = 13.sp,
                     color = TextMuted
@@ -1038,15 +971,23 @@ fun AdminGenerateEnrollmentScreen(
                             try {
                                 val sessionToDelete = activeEnrollments.find { it.id == revokeTargetId }
                                 if (sessionToDelete != null) {
-                                    // Try to delete from backend if it's an enrolled device
-                                    // For now, we'll just remove from local list
-                                    // In production, call: api.deleteDevice(deviceId)
-                                    activeEnrollments.removeIf { it.id == revokeTargetId }
-                                    snackbarHostState.showSnackbar("Device deleted successfully")
+                                    val tokenId = revokeTargetId.toLongOrNull()
+                                    if (tokenId == null) {
+                                        snackbarHostState.showSnackbar("Invalid session id")
+                                    } else {
+                                        val revokeResponse = RemoteDataSource.revokeEnrollmentToken(tokenId)
+                                        if (revokeResponse.isSuccessful || revokeResponse.code() == 404) {
+                                            locallyRevokedIds.add(revokeTargetId)
+                                            activeEnrollments.removeIf { it.id == revokeTargetId }
+                                            snackbarHostState.showSnackbar("Enrollment session revoked")
+                                        } else {
+                                            snackbarHostState.showSnackbar("Failed to revoke session (${revokeResponse.code()})")
+                                        }
+                                    }
                                 }
                                 showRevokeDialog = false
                             } catch (e: Exception) {
-                                snackbarHostState.showSnackbar("Failed to delete device: ${e.message}")
+                                snackbarHostState.showSnackbar("Failed to revoke session: ${e.message}")
                             } finally {
                                 isRevoking = false
                             }
@@ -1063,7 +1004,7 @@ fun AdminGenerateEnrollmentScreen(
                             strokeWidth = 1.5.dp
                         )
                     } else {
-                        Text("Delete Device", fontFamily = PlusJakartaSans, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = Color.White)
+                        Text("Revoke Session", fontFamily = PlusJakartaSans, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = Color.White)
                     }
                 }
             },
@@ -1091,7 +1032,8 @@ private fun EnrollmentTokenResponse.toEnrollmentSession(): EnrollmentSession {
         validityHours = validityHours,
         createdAt = createdAtMillis,
         expiresAt = expiresAtMillis,
-        status = status
+        status = status,
+        deviceId = deviceId
     )
 }
 

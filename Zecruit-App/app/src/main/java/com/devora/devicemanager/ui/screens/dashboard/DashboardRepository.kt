@@ -35,4 +35,14 @@ class DashboardRepository {
             emptyList()
         }
     }
+
+    suspend fun deleteActivity(activityId: Long): Boolean {
+        return try {
+            val response = RemoteDataSource.deleteActivity(activityId)
+            response.isSuccessful
+        } catch (e: Exception) {
+            Log.e("DashboardRepository", "Failed to delete activity", e)
+            false
+        }
+    }
 }

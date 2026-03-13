@@ -197,7 +197,7 @@ fun AppNavigation(
         // Admin Generate Enrollment (QR/Token)
         composable("admin_generate_enrollment") {
             AdminGenerateEnrollmentScreen(
-                onBack = { navController.popBackStack() },
+                onNavigate = navigateTo,
                 isDark = isDark
             )
         }

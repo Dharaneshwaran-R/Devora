@@ -27,9 +27,17 @@ public class ActivityController {
     public ResponseEntity<List<DeviceActivity>> getDeviceActivities(@PathVariable String deviceId) {
         List<DeviceActivity> activities = activityRepository.findByDeviceIdOrderByCreatedAtDesc(deviceId);
         return ResponseEntity.ok(
-            activities.stream()
-                .limit(10)
-                .collect(Collectors.toList())
-        );
+                activities.stream()
+                        .limit(10)
+                        .collect(Collectors.toList()));
+    }
+
+    @DeleteMapping("/activities/{activityId}")
+    public ResponseEntity<Void> deleteActivity(@PathVariable Long activityId) {
+        if (!activityRepository.existsById(activityId)) {
+            return ResponseEntity.notFound().build();
+        }
+        activityRepository.deleteById(activityId);
+        return ResponseEntity.noContent().build();
     }
 }
