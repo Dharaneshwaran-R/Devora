@@ -41,12 +41,15 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.QrCodeScanner
 import androidx.compose.material.icons.outlined.Security
 import androidx.compose.material.icons.outlined.VerifiedUser
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -149,9 +152,13 @@ fun EmployeeEnrollmentScreen(
     }
 
     // Show error messages from the ViewModel
+    val isExpiredError = enrollmentState.errorMessage
+        ?.contains("expired", ignoreCase = true) == true
     if (enrollmentState.errorMessage != null) {
         LaunchedEffect(enrollmentState.errorMessage) {
-            snackbarHostState.showSnackbar(enrollmentState.errorMessage ?: "Enrollment error")
+            if (!isExpiredError) {
+                snackbarHostState.showSnackbar(enrollmentState.errorMessage ?: "Enrollment error")
+            }
         }
     }
 
@@ -222,6 +229,41 @@ fun EmployeeEnrollmentScreen(
             )
 
             Spacer(Modifier.height(20.dp))
+
+            if (isExpiredError) {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF0F0)),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFF44336)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.Top
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.ErrorOutline,
+                            contentDescription = null,
+                            tint = Color(0xFFF44336)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Column {
+                            Text(
+                                text = "Token Expired",
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFFF44336),
+                                fontFamily = PlusJakartaSans
+                            )
+                            Text(
+                                text = "This enrollment token has expired. Please ask your IT admin to generate a new token.",
+                                fontSize = 12.sp,
+                                color = Color(0xFFF44336),
+                                fontFamily = DMSans
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+            }
 
             // ══════ SECURITY INFO CARD ══════
             Box(

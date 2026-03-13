@@ -21,6 +21,10 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.DismissDirection
+import androidx.compose.material.DismissValue
+import androidx.compose.material.ExperimentalMaterialApi
+import androidx.compose.material.SwipeToDismiss
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DarkMode
@@ -29,25 +33,34 @@ import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.outlined.Assessment
+import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.PersonAdd
 import androidx.compose.material.icons.outlined.Security
 import androidx.compose.material.icons.outlined.Sync
+import androidx.compose.material.rememberDismissState
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SwipeToDismissBox
-import androidx.compose.material3.SwipeToDismissBoxValue
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -57,6 +70,8 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -64,6 +79,7 @@ import com.devora.devicemanager.ui.components.DevoraBottomNav
 import com.devora.devicemanager.ui.components.DevoraCard
 import com.devora.devicemanager.ui.components.SectionHeader
 import com.devora.devicemanager.network.DeviceActivityResponse
+import com.devora.devicemanager.data.remote.RemoteDataSource
 import com.devora.devicemanager.ui.theme.BgBase
 import com.devora.devicemanager.ui.theme.BgElevated
 import com.devora.devicemanager.ui.theme.DMSans
@@ -86,6 +102,7 @@ import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.lifecycle.viewmodel.compose.viewModel
 
@@ -136,7 +153,7 @@ private fun getTimeAgo(timestamp: String?, currentTime: Long): String {
 // DASHBOARD SCREEN
 // ══════════════════════════════════════
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterialApi::class)
 @Composable
 fun DashboardScreen(
     onNavigate: (String) -> Unit,
@@ -163,6 +180,40 @@ fun DashboardScreen(
 
     val dashboardStats = dashboardUiState.stats
     val recentActivities: List<DeviceActivityResponse> = dashboardUiState.recentActivities
+    var activities by remember { mutableStateOf(recentActivities) }
+    val coroutineScope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    LaunchedEffect(recentActivities) {
+        activities = recentActivities
+    }
+
+    suspend fun loadActivities() {
+        try {
+            val response = RemoteDataSource.getActivities(limit = 10)
+            if (response.isSuccessful) {
+                activities = response.body() ?: emptyList()
+            }
+        } catch (_: Exception) {
+            // Keep current list if reload fails.
+        }
+    }
+
+    suspend fun deleteActivity(activityId: Long) {
+        try {
+            val response = RemoteDataSource.deleteActivity(activityId)
+            if (response.isSuccessful) {
+                snackbarHostState.showSnackbar(
+                    message = "Activity removed",
+                    duration = SnackbarDuration.Short
+                )
+            } else {
+                loadActivities()
+            }
+        } catch (_: Exception) {
+            loadActivities()
+        }
+    }
 
     val totalDevices = dashboardStats?.totalDevices ?: 0
     val activeDevices = dashboardStats?.activeDevices ?: 0
@@ -179,6 +230,7 @@ fun DashboardScreen(
     )
 
     Scaffold(
+        snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         bottomBar = {
             DevoraBottomNav(
                 currentRoute = "dashboard",
@@ -438,19 +490,6 @@ fun DashboardScreen(
             item {
                 Box(modifier = Modifier.padding(horizontal = 16.dp)) {
                     DevoraCard(isDark = isDark) {
-                        val activities = recentActivities.map { a ->
-                            Activity(
-                                id = a.id,
-                                description = a.description ?: "Unknown activity",
-                                device = if (!a.deviceId.isNullOrBlank()) "Device ···${a.deviceId!!.takeLast(6)}" else "",
-                                time = getTimeAgo(a.createdAt, currentTime),
-                                color = when (a.severity) {
-                                    "CRITICAL" -> Danger
-                                    "WARNING" -> WarningColor
-                                    else -> Success
-                                }
-                            )
-                        }
                         if (activities.isEmpty()) {
                             Box(
                                 modifier = Modifier
@@ -478,77 +517,81 @@ fun DashboardScreen(
                         } else {
                             Column {
                                 activities.forEachIndexed { index, activity ->
-                                    val dismissState = rememberSwipeToDismissBoxState(
-                                        confirmValueChange = { dismissValue ->
-                                            if (dismissValue == SwipeToDismissBoxValue.StartToEnd) {
-                                                dashboardViewModel.dismissActivity(activity.id)
-                                                true
-                                            } else {
-                                                false
+                                    key(activity.id) {
+                                        val dismissState = rememberDismissState(
+                                            confirmStateChange = { dismissValue ->
+                                                if (dismissValue == DismissValue.DismissedToStart) {
+                                                    coroutineScope.launch {
+                                                        deleteActivity(activity.id)
+                                                    }
+                                                    true
+                                                } else {
+                                                    false
+                                                }
                                             }
-                                        }
-                                    )
+                                        )
 
-                                    SwipeToDismissBox(
-                                        state = dismissState,
-                                        enableDismissFromEndToStart = false,
-                                        backgroundContent = {
-                                            Row(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .heightIn(min = 64.dp)
-                                                    .clip(RoundedCornerShape(10.dp))
-                                                    .background(Danger.copy(alpha = 0.14f))
-                                                    .padding(horizontal = 12.dp),
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Text(
-                                                    text = "Release to delete",
-                                                    fontFamily = DMSans,
-                                                    fontWeight = FontWeight.SemiBold,
-                                                    fontSize = 12.sp,
-                                                    color = Danger
-                                                )
+                                        if (dismissState.isDismissed(DismissDirection.EndToStart)) {
+                                            LaunchedEffect(activity.id) {
+                                                activities = activities.filter { it.id != activity.id }
                                             }
                                         }
-                                    ) {
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(vertical = 10.dp),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.SpaceBetween
-                                        ) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(8.dp)
-                                                    .background(activity.color, CircleShape)
-                                            )
-                                            Spacer(modifier = Modifier.width(12.dp))
-                                            Column(modifier = Modifier.weight(1f)) {
-                                                Text(
-                                                    text = activity.description,
-                                                    fontFamily = DMSans,
-                                                    fontWeight = FontWeight.Normal,
-                                                    fontSize = 13.sp,
-                                                    color = textColor
+
+                                        SwipeToDismiss(
+                                            state = dismissState,
+                                            directions = setOf(DismissDirection.EndToStart),
+                                            background = {
+                                                val showBackground =
+                                                    dismissState.dismissDirection == DismissDirection.EndToStart
+                                                val color by animateColorAsState(
+                                                    targetValue = if (showBackground) {
+                                                        Color(0xFFF44336)
+                                                    } else {
+                                                        Color.Transparent
+                                                    },
+                                                    label = "swipe_bg"
                                                 )
-                                                Text(
-                                                    text = activity.device,
-                                                    fontFamily = DMSans,
-                                                    fontWeight = FontWeight.Normal,
-                                                    fontSize = 12.sp,
-                                                    color = TextMuted
+                                                val alpha by animateFloatAsState(
+                                                    targetValue = if (showBackground) 1f else 0f,
+                                                    label = "swipe_alpha"
+                                                )
+
+                                                Box(
+                                                    modifier = Modifier
+                                                        .fillMaxSize()
+                                                        .clip(RoundedCornerShape(12.dp))
+                                                        .background(color)
+                                                        .padding(end = 20.dp),
+                                                    contentAlignment = Alignment.CenterEnd
+                                                ) {
+                                                    if (alpha > 0f) {
+                                                        Column(
+                                                            horizontalAlignment = Alignment.CenterHorizontally
+                                                        ) {
+                                                            Icon(
+                                                                imageVector = Icons.Outlined.DeleteOutline,
+                                                                contentDescription = "Delete",
+                                                                tint = Color.White.copy(alpha = alpha),
+                                                                modifier = Modifier.size(22.dp)
+                                                            )
+                                                            Spacer(modifier = Modifier.height(2.dp))
+                                                            Text(
+                                                                text = "Delete",
+                                                                color = Color.White.copy(alpha = alpha),
+                                                                fontSize = 10.sp,
+                                                                fontWeight = FontWeight.Medium
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                            },
+                                            dismissContent = {
+                                                ActivityItemCard(
+                                                    activity = activity,
+                                                    currentTime = currentTime
                                                 )
                                             }
-                                            Text(
-                                                text = activity.time,
-                                                fontFamily = JetBrainsMono,
-                                                fontWeight = FontWeight.Normal,
-                                                fontSize = 10.sp,
-                                                color = TextMuted
-                                            )
-                                        }
+                                        )
                                     }
                                     if (index < activities.size - 1) {
                                         HorizontalDivider(
@@ -567,8 +610,82 @@ fun DashboardScreen(
                 }
             }
 
+            item {
+                Text(
+                    text = "\u2190 Swipe left to remove",
+                    fontSize = 10.sp,
+                    color = Color.LightGray,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 32.dp, top = 4.dp, bottom = 8.dp)
+                )
+            }
+
             item { Spacer(modifier = Modifier.height(16.dp)) }
         }
     }
 
+}
+
+@Composable
+private fun ActivityItemCard(
+    activity: DeviceActivityResponse,
+    currentTime: Long
+) {
+    val severityColor = when (activity.severity) {
+        "CRITICAL" -> Color(0xFFF44336)
+        "WARNING" -> Color(0xFFFF9800)
+        else -> Color(0xFF4CAF50)
+    }
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 0.dp, vertical = 2.dp),
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surface,
+        shadowElevation = 1.dp
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .clip(CircleShape)
+                    .background(severityColor)
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = activity.description ?: "Unknown activity",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = activity.deviceId
+                        ?.takeLast(8)
+                        ?.let { "Device \u00b7\u00b7\u00b7$it" }
+                        ?: activity.employeeName
+                        ?: "",
+                    fontSize = 11.sp,
+                    color = Color.Gray
+                )
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = getTimeAgo(activity.createdAt, currentTime),
+                fontSize = 11.sp,
+                color = Color.Gray,
+                textAlign = TextAlign.End
+            )
+        }
+    }
 }

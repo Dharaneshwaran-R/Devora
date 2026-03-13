@@ -54,6 +54,7 @@ import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -87,7 +88,6 @@ import androidx.compose.ui.unit.sp
 import com.devora.devicemanager.ui.components.DevoraCard
 import com.devora.devicemanager.ui.components.DevoraBottomNav
 import com.devora.devicemanager.ui.components.SectionHeader
-import com.devora.devicemanager.ui.components.StatusBadge
 import com.devora.devicemanager.ui.theme.BgBase
 import com.devora.devicemanager.ui.theme.BgElevated
 import com.devora.devicemanager.ui.theme.DMSans
@@ -110,6 +110,10 @@ import com.devora.devicemanager.network.EnrollmentTokenResponse
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.Instant
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
 
 // ══════════════════════════════════════
 // DATA CLASS
@@ -125,35 +129,71 @@ data class EnrollmentSession(
     val validityHours: Int,
     val createdAt: Long,
     val expiresAt: Long,
+    val expiresAtRaw: String,
     val status: String,
     val deviceId: String?
 )
 
-private fun getExpiryDisplay(
-    expiresAt: Long,
-    currentTick: Long
-): Triple<String, Color, Boolean> {
-    val diff = expiresAt - currentTick
-    return if (diff <= 0) {
-        Triple("Expired", Color(0xFFF44336), false)
-    } else {
-        val hours = diff / 3_600_000L
-        val minutes = (diff % 3_600_000L) / 60_000L
-        val seconds = (diff % 60_000L) / 1_000L
+sealed class TokenExpiryState {
+    data class Valid(val text: String) : TokenExpiryState()
+    data class Warning(val text: String) : TokenExpiryState()
+    data class Critical(val text: String) : TokenExpiryState()
+    data class Expired(val text: String) : TokenExpiryState()
+    object Unknown : TokenExpiryState()
+}
 
-        val countdownText = when {
-            hours > 0 -> "Expires in ${hours}h ${minutes}m ${seconds}s"
-            minutes > 0 -> "⚠️ Expires in ${minutes}m ${seconds}s"
-            else -> "⚠️ Expires in ${seconds}s"
-        }
+private fun parseTokenExpiryMillis(expiresAt: String): Long? {
+    val formats = listOf(
+        "yyyy-MM-dd'T'HH:mm:ss.SSS",
+        "yyyy-MM-dd'T'HH:mm:ss",
+        "yyyy-MM-dd HH:mm:ss"
+    )
+    formats.forEach { format ->
+        runCatching {
+            val sdf = SimpleDateFormat(format, Locale.getDefault())
+            sdf.timeZone = TimeZone.getTimeZone("UTC")
+            sdf.parse(expiresAt)?.time
+        }.getOrNull()?.let { return it }
+    }
+    return runCatching { Instant.parse(expiresAt).toEpochMilli() }.getOrNull()
+}
 
-        val color = when {
-            diff < 1_800_000L -> Color(0xFFF44336)
-            diff < 3_600_000L -> Color(0xFFFF9800)
-            else -> Color(0xFF4CAF50)
+private fun getTokenExpiryState(expiresAt: String, currentTick: Long): TokenExpiryState {
+    val expiry = parseTokenExpiryMillis(expiresAt) ?: return TokenExpiryState.Unknown
+    val diff = expiry - currentTick
+    return when {
+        diff <= 0L -> {
+            val ago = currentTick - expiry
+            val expiredText = if (ago < 3_600_000L) {
+                "Expired ${ago / 60_000L}m ago"
+            } else {
+                val h = ago / 3_600_000L
+                val m = (ago % 3_600_000L) / 60_000L
+                "Expired ${h}h ${m}m ago"
+            }
+            TokenExpiryState.Expired(expiredText)
         }
-        val isWarning = diff < 1_800_000L
-        Triple(countdownText, color, isWarning)
+        diff < 300_000L -> {
+            val m = diff / 60_000L
+            val s = (diff % 60_000L) / 1_000L
+            TokenExpiryState.Critical("Expires in ${m}m ${s}s")
+        }
+        diff < 1_800_000L -> {
+            val m = diff / 60_000L
+            val s = (diff % 60_000L) / 1_000L
+            TokenExpiryState.Warning("Expires in ${m}m ${s}s")
+        }
+        else -> {
+            val h = diff / 3_600_000L
+            val m = (diff % 3_600_000L) / 60_000L
+            val s = (diff % 60_000L) / 1_000L
+            val text = if (h > 0L) {
+                "Expires in ${h}h ${m}m ${s}s"
+            } else {
+                "Expires in ${m}m ${s}s"
+            }
+            TokenExpiryState.Valid(text)
+        }
     }
 }
 
@@ -205,7 +245,15 @@ fun AdminGenerateEnrollmentScreen(
 
     val activeEnrollments = remember { mutableStateListOf<EnrollmentSession>() }
 
-    val visibleEnrollments = activeEnrollments.filterNot { locallyRevokedIds.contains(it.id) }
+    val visibleEnrollments = activeEnrollments
+        .filterNot { locallyRevokedIds.contains(it.id) }
+        .filter { token ->
+            val state = getTokenExpiryState(token.expiresAtRaw, tickTrigger)
+            state !is TokenExpiryState.Expired || run {
+                val expiryMillis = parseTokenExpiryMillis(token.expiresAtRaw) ?: return@run true
+                (tickTrigger - expiryMillis) < 600_000L
+            }
+        }
 
     LaunchedEffect(sessionsRefreshTick) {
         isLoadingSessions = true
@@ -1032,6 +1080,7 @@ private fun EnrollmentTokenResponse.toEnrollmentSession(): EnrollmentSession {
         validityHours = validityHours,
         createdAt = createdAtMillis,
         expiresAt = expiresAtMillis,
+        expiresAtRaw = expiresAt ?: "",
         status = status,
         deviceId = deviceId
     )
@@ -1040,6 +1089,11 @@ private fun EnrollmentTokenResponse.toEnrollmentSession(): EnrollmentSession {
 private fun String?.parseIsoMillisOrNow(): Long {
     if (this.isNullOrBlank()) return System.currentTimeMillis()
     return runCatching { Instant.parse(this).toEpochMilli() }
+        .recoverCatching {
+            parseTokenExpiryMillis(this)?.let { millis ->
+                Instant.ofEpochMilli(millis).toEpochMilli()
+            } ?: System.currentTimeMillis()
+        }
         .getOrElse { System.currentTimeMillis() }
 }
 
@@ -1056,6 +1110,27 @@ private fun ActiveEnrollmentCard(
     onRevoke: () -> Unit
 ) {
     DevoraCard(isDark = isDark, accentColor = Warning, modifier = Modifier.fillMaxWidth()) {
+        val expiryState = remember(session.expiresAtRaw, currentTick) {
+            getTokenExpiryState(session.expiresAtRaw, currentTick)
+        }
+        val blinkAlpha by animateFloatAsState(
+            targetValue = when (expiryState) {
+                is TokenExpiryState.Critical -> if ((currentTick / 500L) % 2L == 0L) 1f else 0.3f
+                else -> 1f
+            },
+            animationSpec = tween(300),
+            label = "blink"
+        )
+        val (expiryText, expiryColor) = when (expiryState) {
+            is TokenExpiryState.Valid -> expiryState.text to Color(0xFF4CAF50)
+            is TokenExpiryState.Warning -> expiryState.text to Color(0xFFFF9800)
+            is TokenExpiryState.Critical -> expiryState.text to Color(0xFFF44336)
+            is TokenExpiryState.Expired -> expiryState.text to Color(0xFFF44336)
+            TokenExpiryState.Unknown -> "Unknown" to Color.Gray
+        }
+        val statusText = if (expiryState is TokenExpiryState.Expired) "EXPIRED" else "PENDING"
+        val statusColor = if (expiryState is TokenExpiryState.Expired) Color(0xFFF44336) else Color(0xFFFF9800)
+
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
                 modifier = Modifier
@@ -1099,27 +1174,56 @@ private fun ActiveEnrollmentCard(
                 Spacer(Modifier.height(4.dp))
 
                 // Countdown timer
-                val (expiryText, expiryColor, isWarning) = getExpiryDisplay(session.expiresAt, currentTick)
-                val alpha by animateFloatAsState(
-                    targetValue = if (isWarning) {
-                        if ((currentTick / 500) % 2 == 0L) 1f else 0.3f
-                    } else 1f,
-                    animationSpec = tween(500),
-                    label = "blink"
-                )
                 Text(
                     expiryText,
                     fontFamily = JetBrainsMono,
-                    fontSize = 10.sp,
-                    color = expiryColor.copy(alpha = if (isWarning) alpha else 1f),
-                    fontWeight = if (isWarning) FontWeight.Bold else FontWeight.Normal
+                    fontSize = 12.sp,
+                    color = expiryColor.copy(alpha = blinkAlpha),
+                    fontWeight = when (expiryState) {
+                        is TokenExpiryState.Critical,
+                        is TokenExpiryState.Expired -> FontWeight.Bold
+                        else -> FontWeight.Normal
+                    }
                 )
             }
 
             Spacer(Modifier.width(8.dp))
 
             Column(horizontalAlignment = Alignment.End) {
-                StatusBadge(session.status)
+                if (expiryState is TokenExpiryState.Expired) {
+                    Surface(
+                        shape = RoundedCornerShape(20.dp),
+                        color = Color(0xFFFFF0F0),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFF44336))
+                    ) {
+                        Text(
+                            text = "EXPIRED",
+                            color = Color(0xFFF44336),
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                        )
+                    }
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(statusColor.copy(alpha = 0.12f))
+                            .border(
+                                width = 1.dp,
+                                color = statusColor.copy(alpha = 0.4f),
+                                shape = RoundedCornerShape(20.dp)
+                            )
+                            .padding(horizontal = 8.dp, vertical = 3.dp)
+                    ) {
+                        Text(
+                            text = statusText,
+                            color = statusColor,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
                 Spacer(Modifier.height(8.dp))
                 IconButton(
                     onClick = onRevoke,

@@ -8,7 +8,6 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -94,7 +93,7 @@ fun DevoraCard(
                 defaultElevation = if (isDark) 0.dp else 2.dp
             )
         ) {
-            Row(modifier = Modifier.height(IntrinsicSize.Min)) {
+            Row(modifier = Modifier.fillMaxWidth()) {
                 // Left accent strip
                 if (accentColor != null) {
                     Box(

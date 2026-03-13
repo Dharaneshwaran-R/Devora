@@ -40,4 +40,10 @@ public class ActivityController {
         activityRepository.deleteById(activityId);
         return ResponseEntity.noContent().build();
     }
+
+    @DeleteMapping("/activities/device/{deviceId}")
+    public ResponseEntity<Void> deleteAllDeviceActivities(@PathVariable String deviceId) {
+        activityRepository.deleteByDeviceId(deviceId);
+        return ResponseEntity.noContent().build();
+    }
 }

@@ -23,8 +23,11 @@ import com.mdm.mdm_backend.repository.EmployeeRepository;
 import com.mdm.mdm_backend.repository.EnrollmentTokenRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -114,14 +117,26 @@ public class EnrollmentService {
         String employeeId = null;
 
         if (request.getEnrollmentToken() != null && !request.getEnrollmentToken().isBlank()) {
-            Optional<EnrollmentToken> tokenData = enrollmentTokenRepository.findByToken(request.getEnrollmentToken());
-            if (tokenData.isPresent()) {
-                EnrollmentToken et = tokenData.get();
-                employeeName = et.getEmployeeName();
-                employeeId = et.getEmployeeId();
-                // Mark token as used
-                markTokenAsUsed(request.getEnrollmentToken(), request.getDeviceId());
+            EnrollmentToken token = enrollmentTokenRepository.findByToken(request.getEnrollmentToken())
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "Token not found"));
+
+            if (LocalDateTime.now().isAfter(token.getExpiresAt())) {
+                token.setStatus("EXPIRED");
+                enrollmentTokenRepository.save(token);
+                throw new ResponseStatusException(
+                        HttpStatus.BAD_REQUEST,
+                        "Enrollment token has expired. Please generate a new token.");
             }
+
+            if (!"PENDING".equals(token.getStatus())) {
+                throw new ResponseStatusException(
+                        HttpStatus.BAD_REQUEST,
+                        "Token already used or revoked: " + token.getStatus());
+            }
+
+            employeeName = token.getEmployeeName();
+            employeeId = token.getEmployeeId();
+            markTokenAsUsed(request.getEnrollmentToken(), request.getDeviceId());
         }
 
         if ((employeeName == null || employeeName.isBlank()) || (employeeId == null || employeeId.isBlank())) {
@@ -321,6 +336,19 @@ public class EnrollmentService {
         return enrollmentTokenRepository.findByStatusAndExpiresAtAfterOrderByCreatedAtDesc(
                 "PENDING",
                 LocalDateTime.now());
+    }
+
+    @Scheduled(fixedDelay = 300_000)
+    @Transactional
+    public void expireOldTokens() {
+        List<EnrollmentToken> pendingTokens = enrollmentTokenRepository.findByStatus("PENDING");
+        LocalDateTime now = LocalDateTime.now();
+        pendingTokens.forEach(token -> {
+            if (now.isAfter(token.getExpiresAt())) {
+                token.setStatus("EXPIRED");
+                enrollmentTokenRepository.save(token);
+            }
+        });
     }
 
     private void upsertEmployee(String employeeId, String employeeName, String deviceId, String deviceName) {
