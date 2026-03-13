@@ -91,6 +91,13 @@ dependencies {
     // Google Play Services — Location
     implementation(libs.play.services.location)
 
+    // OpenStreetMap (osmdroid)
+    implementation("org.osmdroid:osmdroid-android:6.1.18")
+    implementation("org.osmdroid:osmdroid-wms:6.1.18")
+
+    // Coroutines Task await extensions (FusedLocationProviderClient)
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3")
+
     // JSON
     implementation(libs.gson)
 

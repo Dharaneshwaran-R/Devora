@@ -256,6 +256,10 @@ class PolicySyncWorker(
                     LocationSyncWorker.schedule(applicationContext)
                     Log.d(TAG, "Executed FORCE_SYNC command ${cmd.id}")
                 }
+                "REQUEST_LOCATION" -> {
+                    LocationSyncWorker.scheduleNow(applicationContext)
+                    Log.d(TAG, "Executed REQUEST_LOCATION command ${cmd.id}")
+                }
                 "CAMERA_DISABLE" -> {
                     dpm.setCameraDisabled(admin, true)
                     Log.d(TAG, "Executed CAMERA_DISABLE command ${cmd.id}")

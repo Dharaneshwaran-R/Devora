@@ -83,7 +83,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.devora.devicemanager.collector.DeviceInfoCollector
-import com.devora.devicemanager.network.DeviceActivityResponse
+import com.devora.devicemanager.network.DevicePolicyResponse
 import com.devora.devicemanager.session.SessionManager
 import com.devora.devicemanager.ui.components.DevoraCard
 import com.devora.devicemanager.ui.components.SectionHeader
@@ -146,6 +146,7 @@ fun EmployeeDashboardScreen(
 
     // FIX 3: Activities state
     var activities by remember { mutableStateOf<List<UIActivity>>(emptyList()) }
+    var policyState by remember { mutableStateOf<DevicePolicyResponse?>(null) }
 
     fun getTimeAgo(timestamp: Long): String {
         val diff = (System.currentTimeMillis() - timestamp).coerceAtLeast(0L)
@@ -248,6 +249,17 @@ fun EmployeeDashboardScreen(
             .take(10)
     }
 
+    suspend fun loadPolicyState() {
+        try {
+            val response = RemoteDataSource.getDevicePolicies(deviceInfo.deviceId)
+            if (response.isSuccessful) {
+                policyState = response.body()
+            }
+        } catch (_: Exception) {
+            // Keep existing state on transient failures; next refresh will retry.
+        }
+    }
+
     suspend fun verifyDeviceStillActive() {
         try {
             val response = RemoteDataSource.checkDevice(deviceInfo.deviceId)
@@ -267,8 +279,10 @@ fun EmployeeDashboardScreen(
 
     LaunchedEffect(Unit) {
         loadActivities()
+        loadPolicyState()
         while (true) {
             verifyDeviceStillActive()
+            loadPolicyState()
             delay(30_000)
         }
     }
@@ -277,6 +291,7 @@ fun EmployeeDashboardScreen(
         if (checkTick > 0) {
             verifyDeviceStillActive()
             loadActivities()
+            loadPolicyState()
         }
     }
 
@@ -292,6 +307,13 @@ fun EmployeeDashboardScreen(
 
     val bgColor = if (isDark) DarkBgBase else BgBase
     val textColor = if (isDark) DarkTextPrimary else TextPrimary
+    val isPolicySynced = policyState != null
+    val appInstallRestricted = (policyState?.installBlocked == true) || (policyState?.uninstallBlocked == true)
+    val activePolicyCount = listOf(
+        policyState?.screenLockRequired == true,
+        appInstallRestricted,
+        policyState?.cameraDisabled == true
+    ).count { it }
 
     Scaffold(
         containerColor = bgColor
@@ -483,7 +505,7 @@ fun EmployeeDashboardScreen(
                             }
                             Spacer(Modifier.height(4.dp))
                             Text(
-                                "Active",
+                                if (isPolicySynced) "$activePolicyCount Active" else "Waiting",
                                 fontFamily = DMSans,
                                 fontSize = 12.sp,
                                 color = textColor
@@ -649,21 +671,54 @@ fun EmployeeDashboardScreen(
                 )
 
                 val policies = listOf(
-                    PolicyStatus(Icons.Outlined.Lock, "Screen Lock", "Active", Success),
+                    PolicyStatus(
+                        Icons.Outlined.Lock,
+                        "Screen Lock Enforcement",
+                        when {
+                            !isPolicySynced -> "Waiting"
+                            policyState?.screenLockRequired == true -> "Required"
+                            else -> "Not Required"
+                        },
+                        when {
+                            !isPolicySynced -> Warning
+                            policyState?.screenLockRequired == true -> Success
+                            else -> TextMuted
+                        }
+                    ),
                     PolicyStatus(
                         Icons.Outlined.Shield,
                         "Factory Reset Protection",
-                        "Active",
-                        Success
+                        if (isPolicySynced) "Unknown" else "Waiting",
+                        if (isPolicySynced) TextMuted else Warning
                     ),
                     PolicyStatus(
                         Icons.Outlined.Block,
                         "App Install Restriction",
-                        "Restricted",
-                        Warning
+                        when {
+                            !isPolicySynced -> "Waiting"
+                            appInstallRestricted -> "Restricted"
+                            else -> "Allowed"
+                        },
+                        when {
+                            !isPolicySynced -> Warning
+                            appInstallRestricted -> Warning
+                            else -> Success
+                        }
                     ),
-                    PolicyStatus(Icons.Outlined.CameraAlt, "Camera", "Enabled", Success),
-                    PolicyStatus(Icons.Outlined.Wifi, "Network Monitoring", "Active", Success)
+                    PolicyStatus(
+                        Icons.Outlined.CameraAlt,
+                        "Camera",
+                        when {
+                            !isPolicySynced -> "Waiting"
+                            policyState?.cameraDisabled == true -> "Disabled"
+                            else -> "Enabled"
+                        },
+                        when {
+                            !isPolicySynced -> Warning
+                            policyState?.cameraDisabled == true -> Warning
+                            else -> Success
+                        }
+                    )
                 )
 
                 policies.forEachIndexed { index, policy ->

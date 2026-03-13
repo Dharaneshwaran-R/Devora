@@ -13,7 +13,7 @@ public class DeviceLocation {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(nullable = false)
+    @Column(name = "device_id", nullable = false)
     private String deviceId;
 
     private Double latitude;
@@ -21,6 +21,6 @@ public class DeviceLocation {
     private Float accuracy;
     private String address;
 
-    @Column(nullable = false)
+    @Column(name = "recorded_at", nullable = false)
     private LocalDateTime recordedAt;
 }

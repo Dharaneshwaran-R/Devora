@@ -371,19 +371,51 @@ public class DeviceController {
         if (lat == null || lng == null)
             return ResponseEntity.badRequest().body(Map.of("message", "latitude and longitude required"));
 
+        String employeeName = deviceRepo.findByDeviceId(deviceId)
+                .map(Device::getEmployeeName).orElse("Unknown");
+
         locationRepo.save(DeviceLocation.builder()
                 .deviceId(deviceId).latitude(lat).longitude(lng)
                 .accuracy(accuracy).address(address)
                 .recordedAt(LocalDateTime.now()).build());
+
+        // Keep only latest 50 points per device.
+        locationRepo.deleteOldLocations(deviceId);
+
+        activityRepo.save(DeviceActivity.builder()
+                .deviceId(deviceId)
+                .employeeName(employeeName)
+                .activityType("LOCATION_UPDATED")
+                .description("Location updated")
+                .severity("INFO")
+                .createdAt(LocalDateTime.now())
+                .build());
+
         return ResponseEntity.ok(Map.of("message", "Location recorded"));
     }
 
     @GetMapping("/devices/{deviceId}/location")
     public ResponseEntity<?> getLocation(@PathVariable String deviceId) {
         return locationRepo.findTopByDeviceIdOrderByRecordedAtDesc(deviceId)
-                .map(loc -> ResponseEntity.ok((Object) loc))
-                .orElse(ResponseEntity.ok(Map.of("message", "No location data")));
+                .map(ResponseEntity::ok)
+                .orElse(ResponseEntity.notFound().build());
     }
+
+    @GetMapping("/devices/{deviceId}/location/history")
+    public ResponseEntity<List<DeviceLocation>> getLocationHistory(
+            @PathVariable String deviceId,
+            @RequestParam(defaultValue = "5") int limit
+    ) {
+        int safeLimit = Math.max(1, Math.min(limit, 10));
+        List<DeviceLocation> locations = locationRepo
+                .findTop10ByDeviceIdOrderByRecordedAtDesc(deviceId)
+                .stream()
+                .limit(safeLimit)
+                .toList();
+
+        return ResponseEntity.ok(locations);
+    }
+
     @PostMapping("/devices/{deviceId}/sign-out")
     public ResponseEntity<?> signOutDevice(@PathVariable String deviceId) {
         // 1. Find the device and set status to OFFLINE

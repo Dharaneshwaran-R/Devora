@@ -172,6 +172,23 @@ data class DeviceLocationResponse(
     @SerializedName("recordedAt") val recordedAt: String?
 )
 
+data class LocationRequest(
+    @SerializedName("latitude") val latitude: Double,
+    @SerializedName("longitude") val longitude: Double,
+    @SerializedName("accuracy") val accuracy: Float,
+    @SerializedName("timestamp") val timestamp: Long
+)
+
+data class LocationResponse(
+    @SerializedName("id") val id: Long,
+    @SerializedName("deviceId") val deviceId: String,
+    @SerializedName("latitude") val latitude: Double,
+    @SerializedName("longitude") val longitude: Double,
+    @SerializedName("accuracy") val accuracy: Float,
+    @SerializedName("address") val address: String?,
+    @SerializedName("recordedAt") val recordedAt: String
+)
+
 data class LocationReportRequest(
     @SerializedName("latitude") val latitude: Double,
     @SerializedName("longitude") val longitude: Double,
@@ -460,6 +477,12 @@ interface EnrollmentApiService {
     // ── Location ──
 
     @POST("api/devices/{deviceId}/location")
+    suspend fun updateLocation(
+        @Path("deviceId") deviceId: String,
+        @Body request: LocationRequest
+    ): Response<Unit>
+
+    @POST("api/devices/{deviceId}/location")
     suspend fun reportLocation(
         @Path("deviceId") deviceId: String,
         @Body request: LocationReportRequest
@@ -469,6 +492,12 @@ interface EnrollmentApiService {
     suspend fun getDeviceLocation(
         @Path("deviceId") deviceId: String
     ): Response<DeviceLocationResponse>
+
+    @GET("api/devices/{deviceId}/location/history")
+    suspend fun getLocationHistory(
+        @Path("deviceId") deviceId: String,
+        @Query("limit") limit: Int = 5
+    ): Response<List<DeviceLocationResponse>>
 }
 
 // ══════════════════════════════════════

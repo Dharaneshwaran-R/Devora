@@ -8,6 +8,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.util.Base64
 import android.util.Log
@@ -39,6 +40,11 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowForward
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.LocationOff
+import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.Map
+import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.Apps
 import androidx.compose.material.icons.outlined.Block
@@ -57,6 +63,7 @@ import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material.icons.outlined.Wifi
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
@@ -83,6 +90,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -135,6 +143,17 @@ import com.devora.devicemanager.ui.theme.TextPrimary
 import com.devora.devicemanager.ui.theme.Warning
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
+import org.osmdroid.config.Configuration
+import org.osmdroid.tileprovider.tilesource.TileSourceFactory
+import org.osmdroid.util.GeoPoint
+import org.osmdroid.views.CustomZoomButtonsController
+import org.osmdroid.views.MapView
+import org.osmdroid.views.overlay.Marker
+import java.net.HttpURLConnection
+import java.net.URL
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -2033,26 +2052,111 @@ private fun ActionsTab(
     onSync: () -> Unit,
     onWipe: () -> Unit
 ) {
+    val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     var cameraDisabled by remember { mutableStateOf(false) }
     var policyLoaded by remember { mutableStateOf(false) }
     var location by remember { mutableStateOf<DeviceLocationResponse?>(null) }
+    var locationHistory by remember { mutableStateOf<List<DeviceLocationResponse>>(emptyList()) }
+    var trackingEnabled by remember { mutableStateOf(false) }
+    var isRequestingLocation by remember { mutableStateOf(false) }
+    var locationAddress by remember { mutableStateOf("Fetching address...") }
+    var currentTime by remember { mutableLongStateOf(System.currentTimeMillis()) }
 
-    // Load policies and location
-    LaunchedEffect(deviceId) {
+    fun openInMaps(lat: Double, lng: Double) {
         try {
-            val pResp = RetrofitClient.api.getDevicePolicies(deviceId)
-            if (pResp.isSuccessful) {
-                cameraDisabled = pResp.body()?.cameraDisabled ?: false
+            val uri = Uri.parse("geo:$lat,$lng?q=$lat,$lng($deviceName)")
+            val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+        } catch (_: Exception) {
+            onShowMessage("Unable to open map app")
+        }
+    }
+
+    suspend fun fetchAddress(lat: Double, lng: Double): String {
+        return withContext(Dispatchers.IO) {
+            try {
+                val url = URL(
+                    "https://nominatim.openstreetmap.org/reverse?lat=$lat&lon=$lng&format=json"
+                )
+                val connection = (url.openConnection() as HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    setRequestProperty("User-Agent", "DEVORA-MDM/1.0")
+                    connectTimeout = 5_000
+                    readTimeout = 5_000
+                }
+
+                val responseText = connection.inputStream.bufferedReader().use { it.readText() }
+                val json = JSONObject(responseText)
+                val address = json.optJSONObject("address")
+                val city = address?.optString("city")
+                    ?.ifBlank { address.optString("town").ifBlank { address.optString("village") } }
+                    .orEmpty()
+                val state = address?.optString("state").orEmpty()
+                val country = address?.optString("country").orEmpty()
+                val shortAddress = listOf(city, state, country).filter { it.isNotBlank() }.joinToString(", ")
+
+                if (shortAddress.isNotBlank()) shortAddress
+                else json.optString("display_name", "${"%.4f".format(lat)}, ${"%.4f".format(lng)}")
+            } catch (_: Exception) {
+                "${"%.4f".format(lat)}, ${"%.4f".format(lng)}"
+            }
+        }
+    }
+
+    suspend fun loadLocationData() {
+        try {
+            val policyResponse = RetrofitClient.api.getDevicePolicies(deviceId)
+            if (policyResponse.isSuccessful) {
+                val policy = policyResponse.body()
+                cameraDisabled = policy?.cameraDisabled ?: cameraDisabled
+                trackingEnabled = policy?.locationTrackingEnabled ?: false
                 policyLoaded = true
             }
         } catch (_: Exception) { }
+
         try {
-            val lResp = RetrofitClient.api.getDeviceLocation(deviceId)
-            if (lResp.isSuccessful) {
-                location = lResp.body()
+            val locationResponse = RetrofitClient.api.getDeviceLocation(deviceId)
+            if (locationResponse.isSuccessful) {
+                val body = locationResponse.body()
+                location = body
+                val lat = body?.latitude
+                val lng = body?.longitude
+                if (lat != null && lng != null) {
+                    locationAddress = fetchAddress(lat, lng)
+                }
             }
         } catch (_: Exception) { }
+
+        try {
+            val historyResponse = RetrofitClient.api.getLocationHistory(deviceId, 5)
+            if (historyResponse.isSuccessful) {
+                locationHistory = historyResponse.body() ?: emptyList()
+            }
+        } catch (_: Exception) { }
+    }
+
+    // Load initial state
+    LaunchedEffect(deviceId) {
+        loadLocationData()
+    }
+
+    // Tick for relative timestamps
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(10_000L)
+            currentTime = System.currentTimeMillis()
+        }
+    }
+
+    // Auto refresh location state
+    LaunchedEffect(deviceId, trackingEnabled) {
+        while (true) {
+            delay(10_000L)
+            loadLocationData()
+        }
     }
 
     DevoraCard(accentColor = PurpleCore, isDark = isDark) {
@@ -2280,112 +2384,367 @@ private fun ActionsTab(
     Spacer(Modifier.height(16.dp))
 
     // ── GPS LOCATION ──
-    val context = LocalContext.current
     DevoraCard(accentColor = PurpleCore, isDark = isDark) {
         SectionHeader(title = "DEVICE LOCATION", isDark = isDark)
 
-        if (location != null && location!!.latitude != null && location!!.longitude != null) {
-            Row(
+        val lat = location?.latitude
+        val lng = location?.longitude
+
+        if (lat != null && lng != null) {
+            DeviceLocationMap(
+                latitude = lat,
+                longitude = lng,
+                employeeName = deviceName,
+                isDark = isDark,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 8.dp),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text("Latitude", fontFamily = DMSans, fontSize = 13.sp, color = TextMuted)
-                Text(
-                    "${location!!.latitude}",
-                    fontFamily = JetBrainsMono,
-                    fontSize = 13.sp,
-                    color = textColor
-                )
-            }
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 8.dp),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text("Longitude", fontFamily = DMSans, fontSize = 13.sp, color = TextMuted)
-                Text(
-                    "${location!!.longitude}",
-                    fontFamily = JetBrainsMono,
-                    fontSize = 13.sp,
-                    color = textColor
-                )
-            }
-            if (location!!.accuracy != null) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 8.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text("Accuracy", fontFamily = DMSans, fontSize = 13.sp, color = TextMuted)
-                    Text(
-                        "${location!!.accuracy}m",
-                        fontFamily = JetBrainsMono,
-                        fontSize = 13.sp,
-                        color = textColor
-                    )
-                }
-            }
-            if (!location!!.recordedAt.isNullOrBlank()) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 8.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text("Last Updated", fontFamily = DMSans, fontSize = 13.sp, color = TextMuted)
-                    Text(
-                        formatTimeAgo(location!!.recordedAt),
-                        fontFamily = JetBrainsMono,
-                        fontSize = 13.sp,
-                        color = textColor
-                    )
-                }
-            }
+                    .height(280.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .border(1.dp, PurpleCore.copy(alpha = 0.20f), RoundedCornerShape(12.dp))
+            )
 
             Spacer(Modifier.height(12.dp))
 
-            // Open in Google Maps button
-            val mapsUrl = "https://www.google.com/maps?q=${location!!.latitude},${location!!.longitude}"
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(44.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(PurpleCore)
-                    .clickable {
-                        try {
-                            val intent = android.content.Intent(
-                                android.content.Intent.ACTION_VIEW,
-                                android.net.Uri.parse(mapsUrl)
-                            )
-                            intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                            context.startActivity(intent)
-                        } catch (_: Exception) { }
-                    },
-                contentAlignment = Alignment.Center
+            Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = if (isDark) DarkBgElevated else Color(0xFFF8F8FF),
+                tonalElevation = 0.dp,
+                shadowElevation = 0.dp,
+                border = androidx.compose.foundation.BorderStroke(1.dp, PurpleCore.copy(alpha = 0.18f))
             ) {
-                Text(
-                    "Open in Google Maps",
-                    fontFamily = PlusJakartaSans,
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 14.sp,
-                    color = Color.White
-                )
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Filled.Place,
+                            contentDescription = null,
+                            tint = PurpleCore,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            locationAddress,
+                            fontFamily = PlusJakartaSans,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 13.sp,
+                            color = textColor
+                        )
+                    }
+
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "${"%.6f".format(lat)}° N, ${"%.6f".format(lng)}° E",
+                        fontFamily = JetBrainsMono,
+                        fontSize = 11.sp,
+                        color = TextMuted
+                    )
+
+                    Spacer(Modifier.height(4.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            "Accuracy: ±${(location?.accuracy ?: 0f).toInt()}m",
+                            fontFamily = DMSans,
+                            fontSize = 11.sp,
+                            color = TextMuted
+                        )
+                        Text(
+                            "Updated: ${getTimeAgo(location?.recordedAt.orEmpty(), currentTime)}",
+                            fontFamily = DMSans,
+                            fontSize = 11.sp,
+                            color = TextMuted
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(10.dp))
+
+            OutlinedButton(
+                onClick = { openInMaps(lat, lng) },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(10.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, PurpleCore),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = PurpleCore)
+            ) {
+                Icon(Icons.Filled.Map, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Open in Google Maps")
             }
         } else {
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = if (isDark) DarkBgElevated else Color(0xFFF5F5F5)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(200.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Icon(
+                        Icons.Filled.LocationOff,
+                        contentDescription = null,
+                        tint = TextMuted,
+                        modifier = Modifier.size(40.dp)
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text("No location data available", color = TextMuted, fontSize = 13.sp)
+                    Text("Enable tracking to start", color = TextMuted.copy(alpha = 0.7f), fontSize = 11.sp)
+                }
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        Surface(
+            shape = RoundedCornerShape(10.dp),
+            color = if (isDark) DarkBgElevated else BgSurface,
+            shadowElevation = 1.dp
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column {
+                    Text(
+                        "Location Tracking",
+                        fontFamily = PlusJakartaSans,
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 14.sp,
+                        color = textColor
+                    )
+                    Text(
+                        if (trackingEnabled) "Updates every 5 minutes" else "Tracking disabled (one-time request available)",
+                        fontFamily = DMSans,
+                        fontSize = 11.sp,
+                        color = TextMuted
+                    )
+                }
+                Switch(
+                    checked = trackingEnabled,
+                    onCheckedChange = { enabled ->
+                        trackingEnabled = enabled
+                        coroutineScope.launch {
+                            try {
+                                val response = RetrofitClient.api.updateDevicePolicy(
+                                    deviceId,
+                                    PolicyUpdateRequest(locationTrackingEnabled = enabled)
+                                )
+                                if (!response.isSuccessful) {
+                                    trackingEnabled = !enabled
+                                    onShowMessage("Failed to update location tracking policy")
+                                } else {
+                                    onShowMessage(
+                                        if (enabled) "Location tracking enabled for $deviceName"
+                                        else "Location tracking disabled for $deviceName"
+                                    )
+                                }
+                            } catch (_: Exception) {
+                                trackingEnabled = !enabled
+                                onShowMessage("Failed to update location tracking policy")
+                            }
+                        }
+                    },
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = Color.White,
+                        checkedTrackColor = PurpleCore
+                    )
+                )
+            }
+        }
+
+        Spacer(Modifier.height(8.dp))
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(44.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(if (!isRequestingLocation) PurpleCore else PurpleCore.copy(alpha = 0.50f))
+                .clickable(enabled = !isRequestingLocation) {
+                    coroutineScope.launch {
+                        isRequestingLocation = true
+                        try {
+                            val beforeLat = location?.latitude
+                            val beforeLng = location?.longitude
+
+                            val commandResponse = RetrofitClient.api.createDeviceCommand(
+                                deviceId,
+                                CommandRequest(type = "REQUEST_LOCATION")
+                            )
+                            if (commandResponse.isSuccessful) {
+                                onShowMessage("Location request sent")
+                                repeat(4) {
+                                    delay(3_000L)
+                                    loadLocationData()
+                                }
+
+                                val afterLat = location?.latitude
+                                val afterLng = location?.longitude
+
+                                if (afterLat == null || afterLng == null) {
+                                    onShowMessage("Location request processed. Waiting for first GPS fix.")
+                                } else if (beforeLat == afterLat && beforeLng == afterLng) {
+                                    onShowMessage("Location unchanged. Device may be stationary or emulator GPS is fixed.")
+                                } else {
+                                    onShowMessage("Location updated successfully")
+                                }
+                            } else {
+                                onShowMessage("Failed to request location")
+                            }
+                        } catch (_: Exception) {
+                            onShowMessage("Failed to request location")
+                        } finally {
+                            isRequestingLocation = false
+                        }
+                    }
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            if (isRequestingLocation) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        color = Color.White,
+                        strokeWidth = 2.dp
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text("Requesting...", color = Color.White, fontFamily = PlusJakartaSans, fontSize = 13.sp)
+                }
+            } else {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.MyLocation, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        if (trackingEnabled) "Request Location Now" else "Request One-Time Location",
+                        color = Color.White,
+                        fontFamily = PlusJakartaSans,
+                        fontSize = 13.sp
+                    )
+                }
+            }
+        }
+
+        if (locationHistory.isNotEmpty()) {
+            Spacer(Modifier.height(12.dp))
             Text(
-                "No location data available yet.",
-                fontFamily = DMSans,
-                fontSize = 13.sp,
+                "LOCATION HISTORY",
+                fontFamily = JetBrainsMono,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 11.sp,
                 color = TextMuted,
-                modifier = Modifier.padding(vertical = 16.dp)
+                letterSpacing = 0.4.sp
             )
+            Spacer(Modifier.height(6.dp))
+
+            locationHistory.take(5).forEachIndexed { index, loc ->
+                val historyLat = loc.latitude ?: return@forEachIndexed
+                val historyLng = loc.longitude ?: return@forEachIndexed
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 3.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(6.dp)
+                            .clip(CircleShape)
+                            .background(if (index == 0) PurpleCore else TextMuted.copy(alpha = 0.35f))
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        "${"%.4f".format(historyLat)}, ${"%.4f".format(historyLng)}",
+                        fontFamily = JetBrainsMono,
+                        fontSize = 11.sp,
+                        color = if (index == 0) PurpleCore else TextMuted,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text(
+                        getTimeAgo(loc.recordedAt.orEmpty(), currentTime),
+                        fontFamily = DMSans,
+                        fontSize = 10.sp,
+                        color = TextMuted.copy(alpha = 0.8f)
+                    )
+                }
+            }
         }
     }
+}
+
+// ══════════════════════════════════════
+// DEVICE LOCATION MAP (OpenStreetMap)
+// ══════════════════════════════════════
+
+@Composable
+private fun DeviceLocationMap(
+    latitude: Double,
+    longitude: Double,
+    employeeName: String,
+    isDark: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+
+    LaunchedEffect(Unit) {
+        Configuration.getInstance().load(
+            context,
+            context.getSharedPreferences("osmdroid", Context.MODE_PRIVATE)
+        )
+        Configuration.getInstance().userAgentValue = context.packageName
+    }
+
+    AndroidView(
+        modifier = modifier,
+        factory = { ctx ->
+            MapView(ctx).apply {
+                setTileSource(TileSourceFactory.MAPNIK)
+                zoomController.setVisibility(CustomZoomButtonsController.Visibility.SHOW_AND_FADEOUT)
+                setMultiTouchControls(true)
+                controller.setZoom(16.0)
+                controller.setCenter(GeoPoint(latitude, longitude))
+
+                val marker = Marker(this)
+                marker.position = GeoPoint(latitude, longitude)
+                marker.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                marker.title = "$employeeName's Device"
+                marker.snippet = "Lat: ${"%.4f".format(latitude)}, Lng: ${"%.4f".format(longitude)}"
+                marker.icon = androidx.core.content.ContextCompat.getDrawable(
+                    ctx,
+                    android.R.drawable.ic_menu_mylocation
+                )
+                overlays.add(marker)
+            }
+        },
+        update = { mapView ->
+            mapView.overlays.clear()
+            mapView.controller.animateTo(GeoPoint(latitude, longitude))
+
+            val marker = Marker(mapView)
+            marker.position = GeoPoint(latitude, longitude)
+            marker.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+            marker.title = "$employeeName's Device"
+            marker.snippet = "Lat: ${"%.4f".format(latitude)}, Lng: ${"%.4f".format(longitude)}"
+            marker.icon = androidx.core.content.ContextCompat.getDrawable(
+                context,
+                android.R.drawable.ic_menu_mylocation
+            )
+
+            mapView.overlays.add(marker)
+            mapView.invalidate()
+        }
+    )
 }
 
 // ══════════════════════════════════════
