@@ -131,7 +131,7 @@ class HeartbeatService : Service() {
 
     /**
      * Fetches restricted apps from backend.
-     * If Device Owner: uses setApplicationHidden().
+     * If Device Owner: uses setPackagesSuspended() so apps stay visible but blocked.
      * Always updates the local cache for UsageStats-based monitoring.
      */
     private suspend fun enforceAppRestrictions(deviceId: String) {
@@ -147,23 +147,29 @@ class HeartbeatService : Service() {
 
             if (isDeviceOwner) {
                 val admin = AdminReceiver.getComponentName(this@HeartbeatService)
+                val toSuspend = mutableSetOf<String>()
+                val explicitUnsuspend = mutableSetOf<String>()
                 for (r in restrictions) {
                     if (r.restricted) {
                         newRestricted[r.packageName] = r.appName ?: r.packageName
-                        val hidden = dpm.setApplicationHidden(admin, r.packageName, true)
-                        if (hidden) Log.d(TAG, "Hidden app: ${r.packageName}")
+                        toSuspend.add(r.packageName)
                     } else {
-                        dpm.setApplicationHidden(admin, r.packageName, false)
+                        explicitUnsuspend.add(r.packageName)
                     }
                 }
 
-                // Unhide previously restricted apps
+                // Unsuspend previously restricted apps no longer present.
                 val prefs = getSharedPreferences("devora_restrictions", Context.MODE_PRIVATE)
                 val previousRestricted = prefs.getStringSet("restricted_packages", emptySet()) ?: emptySet()
-                val toUnhide = previousRestricted - newRestricted.keys
-                for (pkg in toUnhide) {
-                    dpm.setApplicationHidden(admin, pkg, false)
-                    Log.d(TAG, "Unhidden app: $pkg")
+                val toUnsuspend = explicitUnsuspend + (previousRestricted - newRestricted.keys)
+
+                if (toSuspend.isNotEmpty()) {
+                    dpm.setPackagesSuspended(admin, toSuspend.toTypedArray(), true)
+                    Log.d(TAG, "Suspended ${toSuspend.size} app(s)")
+                }
+                if (toUnsuspend.isNotEmpty()) {
+                    dpm.setPackagesSuspended(admin, toUnsuspend.toTypedArray(), false)
+                    Log.d(TAG, "Unsuspended ${toUnsuspend.size} app(s)")
                 }
                 prefs.edit().putStringSet("restricted_packages", newRestricted.keys.toSet()).apply()
             } else {

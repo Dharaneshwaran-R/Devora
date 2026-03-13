@@ -19,7 +19,8 @@ data class AppInfo(
     val versionCode: Long,
     val isSystemApp: Boolean,
     val installSource: String,
-    val iconBase64: String
+    val iconBase64: String,
+    val isSuspended: Boolean
 )
 
 object AppInventoryCollector {
@@ -28,6 +29,10 @@ object AppInventoryCollector {
 
     fun collect(context: Context): List<AppInfo> {
         val pm = context.packageManager
+        val restrictedSet = context
+            .getSharedPreferences("devora_restrictions", Context.MODE_PRIVATE)
+            .getStringSet("restricted_packages", emptySet())
+            ?: emptySet()
 
         val packages: List<PackageInfo> = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             pm.getInstalledPackages(PackageManager.PackageInfoFlags.of(0L))
@@ -36,10 +41,10 @@ object AppInventoryCollector {
             pm.getInstalledPackages(0)
         }
 
-        return packages.map { info -> info.toAppInfo(pm) }
+        return packages.map { info -> info.toAppInfo(pm, restrictedSet) }
     }
 
-    private fun PackageInfo.toAppInfo(pm: PackageManager): AppInfo {
+    private fun PackageInfo.toAppInfo(pm: PackageManager, restrictedSet: Set<String>): AppInfo {
         val appLabel = applicationInfo?.loadLabel(pm)?.toString().orEmpty()
 
         val versionCode: Long = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
@@ -55,6 +60,7 @@ object AppInventoryCollector {
 
         val installer = getInstallerPackage(pm, packageName.orEmpty())
         val icon = getAppIconBase64(pm, packageName.orEmpty())
+        val suspended = restrictedSet.contains(packageName.orEmpty())
 
         return AppInfo(
             appName = appLabel,
@@ -63,7 +69,8 @@ object AppInventoryCollector {
             versionCode = versionCode,
             isSystemApp = isSystem,
             installSource = installer,
-            iconBase64 = icon
+            iconBase64 = icon,
+            isSuspended = suspended
         )
     }
 

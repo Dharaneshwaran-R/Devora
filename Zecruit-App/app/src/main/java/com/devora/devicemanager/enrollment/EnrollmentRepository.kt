@@ -154,6 +154,7 @@ class EnrollmentRepository(
                         versionCode = app.versionCode,
                         installSource = app.installSource,
                         isSystemApp = app.isSystemApp,
+                        isSuspended = app.isSuspended,
                         iconBase64 = app.iconBase64
                     )
                 }

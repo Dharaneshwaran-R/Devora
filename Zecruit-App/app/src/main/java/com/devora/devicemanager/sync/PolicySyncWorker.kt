@@ -2,6 +2,7 @@ package com.devora.devicemanager.sync
 
 import android.app.admin.DevicePolicyManager
 import android.content.Context
+import android.os.Build
 import android.os.UserManager
 import android.util.Log
 import androidx.work.BackoffPolicy
@@ -13,12 +14,13 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.devora.devicemanager.AdminReceiver
+import com.devora.devicemanager.network.DeviceAppRestrictionResponse
 import com.devora.devicemanager.network.RetrofitClient
 import java.util.concurrent.TimeUnit
 
 /**
  * Periodic worker (every 15 min — WorkManager minimum) that enforces MDM policies:
- *  1. App restrictions   — setApplicationHidden() per restricted app
+ *  1. App restrictions   — setPackagesSuspended() per restricted app
  *  2. Camera policy      — setCameraDisabled()
  *  3. Install/uninstall  — addUserRestriction(DISALLOW_INSTALL/UNINSTALL_APPS)
  *  4. Pending commands   — LOCK → lockNow(), WIPE → wipeData(), CAMERA_* → setCameraDisabled()
@@ -91,38 +93,90 @@ class PolicySyncWorker(
         dpm: DevicePolicyManager,
         admin: android.content.ComponentName
     ) {
+        if (!dpm.isDeviceOwnerApp(applicationContext.packageName)) {
+            Log.w(TAG, "Not device owner, skipping app restrictions")
+            return
+        }
+
         val response = RetrofitClient.api.getAllAppRestrictions(deviceId)
         if (!response.isSuccessful) return
 
         val restrictions = response.body() ?: emptyList()
+        applyAppRestrictions(dpm, admin, restrictions)
+    }
 
-        // Hide restricted apps
-        val restrictedPackages = mutableSetOf<String>()
-        for (r in restrictions) {
-            if (r.restricted) {
-                restrictedPackages.add(r.packageName)
-                val hidden = dpm.setApplicationHidden(admin, r.packageName, true)
-                if (hidden) {
-                    Log.d(TAG, "Hidden app: ${r.packageName}")
+    private fun applyAppRestrictions(
+        dpm: DevicePolicyManager,
+        adminComponent: android.content.ComponentName,
+        restrictedApps: List<DeviceAppRestrictionResponse>
+    ) {
+        if (!dpm.isDeviceOwnerApp(applicationContext.packageName)) {
+            Log.w(TAG, "Not device owner, skipping")
+            return
+        }
+
+        val restrictionPrefs = applicationContext.getSharedPreferences("devora_restrictions", Context.MODE_PRIVATE)
+        val previousRestricted = restrictionPrefs.getStringSet("restricted_packages", emptySet()) ?: emptySet()
+
+        val restrictedNow = restrictedApps
+            .filter { it.restricted }
+            .map { it.packageName }
+            .toSet()
+
+        val explicitUnsuspend = restrictedApps
+            .filter { !it.restricted }
+            .map { it.packageName }
+            .toSet()
+
+        val toSuspend = restrictedNow.toTypedArray()
+        val toUnsuspend = (explicitUnsuspend + (previousRestricted - restrictedNow)).toTypedArray()
+
+        if (toSuspend.isNotEmpty()) {
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    // Call the richer overload via reflection when available on this API/SDK level.
+                    try {
+                        val suspendDialogInfoClass = Class.forName("android.content.pm.SuspendDialogInfo")
+                        val builderClass = Class.forName("android.content.pm.SuspendDialogInfo\$Builder")
+                        val builder = builderClass.getDeclaredConstructor().newInstance()
+                        builderClass.getMethod("setTitle", String::class.java)
+                            .invoke(builder, "App Restricted")
+                        builderClass.getMethod("setMessage", String::class.java)
+                            .invoke(builder, "This app has been restricted by your IT administrator. Contact your admin for access.")
+                        val dialogInfo = builderClass.getMethod("build").invoke(builder)
+
+                        val method = DevicePolicyManager::class.java.getMethod(
+                            "setPackagesSuspended",
+                            android.content.ComponentName::class.java,
+                            Array<String>::class.java,
+                            Boolean::class.javaPrimitiveType,
+                            android.os.PersistableBundle::class.java,
+                            android.os.PersistableBundle::class.java,
+                            suspendDialogInfoClass
+                        )
+                        method.invoke(dpm, adminComponent, toSuspend, true, null, null, dialogInfo)
+                    } catch (_: Exception) {
+                        dpm.setPackagesSuspended(adminComponent, toSuspend, true)
+                    }
                 } else {
-                    Log.w(TAG, "Failed to hide: ${r.packageName}")
+                    dpm.setPackagesSuspended(adminComponent, toSuspend, true)
                 }
-            } else {
-                // Unhide apps that are no longer restricted
-                dpm.setApplicationHidden(admin, r.packageName, false)
+                Log.d(TAG, "Suspended ${toSuspend.size} app(s)")
+            } catch (e: Exception) {
+                Log.e(TAG, "Suspend failed: ${e.message}")
             }
         }
 
-        // Unhide previously restricted apps that are no longer in the list
-        val restrictionPrefs = applicationContext.getSharedPreferences("devora_restrictions", Context.MODE_PRIVATE)
-        val previousRestricted = restrictionPrefs.getStringSet("restricted_packages", emptySet()) ?: emptySet()
-        val toUnhide = previousRestricted - restrictedPackages
-        for (pkg in toUnhide) {
-            dpm.setApplicationHidden(admin, pkg, false)
-            Log.d(TAG, "Unhidden app: $pkg")
+        if (toUnsuspend.isNotEmpty()) {
+            try {
+                dpm.setPackagesSuspended(adminComponent, toUnsuspend, false)
+                Log.d(TAG, "Unsuspended ${toUnsuspend.size} app(s)")
+            } catch (e: Exception) {
+                Log.e(TAG, "Unsuspend failed: ${e.message}")
+            }
         }
 
-        restrictionPrefs.edit().putStringSet("restricted_packages", restrictedPackages).apply()
+        restrictionPrefs.edit().putStringSet("restricted_packages", restrictedNow).apply()
     }
 
     private suspend fun enforcePolicies(
@@ -130,6 +184,11 @@ class PolicySyncWorker(
         dpm: DevicePolicyManager,
         admin: android.content.ComponentName
     ) {
+        if (!dpm.isDeviceOwnerApp(applicationContext.packageName)) {
+            Log.w(TAG, "Not device owner, skipping policy enforcement")
+            return
+        }
+
         val response = RetrofitClient.api.getDevicePolicies(deviceId)
         if (!response.isSuccessful) return
 
@@ -160,6 +219,11 @@ class PolicySyncWorker(
         dpm: DevicePolicyManager,
         admin: android.content.ComponentName
     ) {
+        if (!dpm.isDeviceOwnerApp(applicationContext.packageName)) {
+            Log.w(TAG, "Not device owner, skipping command execution")
+            return
+        }
+
         val response = RetrofitClient.api.getPendingCommands(deviceId)
         if (!response.isSuccessful) return
 

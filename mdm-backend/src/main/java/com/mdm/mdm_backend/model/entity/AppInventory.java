@@ -22,6 +22,8 @@ public class AppInventory {
     private Long versionCode;
     private String installSource;
     private Boolean isSystemApp;
+    @Column(name = "is_suspended")
+    private Boolean isSuspended;
 
     @Column(columnDefinition = "TEXT")
     private String iconBase64;

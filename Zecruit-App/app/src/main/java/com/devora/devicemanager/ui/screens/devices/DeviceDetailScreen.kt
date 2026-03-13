@@ -1,9 +1,17 @@
 package com.devora.devicemanager.ui.screens.devices
 
-import com.devora.devicemanager.data.remote.RemoteDataSource
 import android.graphics.BitmapFactory
+import android.app.PendingIntent
+import android.app.admin.DevicePolicyManager
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.util.Base64
 import android.util.Log
+import android.widget.Toast
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -30,6 +38,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.ArrowForward
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.Apps
 import androidx.compose.material.icons.outlined.Block
@@ -46,16 +55,25 @@ import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material.icons.outlined.Wifi
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Surface
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -77,6 +95,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.devora.devicemanager.AdminReceiver
 import com.devora.devicemanager.network.AppInventoryItem
 import com.devora.devicemanager.network.DeviceActivityResponse
 import com.devora.devicemanager.network.DeviceAppRestrictionResponse
@@ -86,6 +105,7 @@ import com.devora.devicemanager.network.DeviceResponse
 import com.devora.devicemanager.network.LocationReportRequest
 import com.devora.devicemanager.network.PolicyUpdateRequest
 import com.devora.devicemanager.network.RestrictAppRequestNew
+import com.devora.devicemanager.network.RetrofitClient
 import com.devora.devicemanager.ui.components.DevoraCard
 import com.devora.devicemanager.ui.components.SectionHeader
 import com.devora.devicemanager.ui.components.StatusBadge
@@ -110,6 +130,10 @@ import com.devora.devicemanager.ui.theme.TextPrimary
 import com.devora.devicemanager.ui.theme.Warning
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 // ══════════════════════════════════════
 // DEVICE DETAIL SCREEN
@@ -126,7 +150,7 @@ fun DeviceDetailScreen(
 
     LaunchedEffect(deviceId) {
         try {
-            val response = RemoteDataSource.getDeviceList()
+            val response = RetrofitClient.api.getDeviceList()
             if (response.isSuccessful) {
                 deviceResponse = response.body()?.find { it.deviceId == deviceId }
             }
@@ -319,7 +343,7 @@ fun DeviceDetailScreen(
                 showLockDialog = false
                 coroutineScope.launch {
                     try {
-                        val resp = RemoteDataSource.lockDevice(deviceId)
+                        val resp = RetrofitClient.api.lockDevice(deviceId)
                         if (resp.isSuccessful) {
                             snackbarHostState.showSnackbar("✓ Lock command sent")
                         } else {
@@ -599,7 +623,7 @@ fun DeviceDetailScreen(
                                         wipeStep = 0
                                         coroutineScope.launch {
                                             try {
-                                                val resp = RemoteDataSource.wipeDevice(deviceId)
+                                                val resp = RetrofitClient.api.wipeDevice(deviceId)
                                                 if (resp.isSuccessful) {
                                                     snackbarHostState.showSnackbar("⚠ Device wipe command sent")
                                                 } else {
@@ -778,44 +802,82 @@ private fun InfoTab(device: Device, deviceResponse: DeviceResponse?, isDark: Boo
 // APPS TAB
 // ══════════════════════════════════════
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AppsTab(deviceId: String, isDark: Boolean, textColor: Color) {
+    data class AppTab(val label: String, val count: Int)
+
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+
     var apps by remember { mutableStateOf<List<AppInventoryItem>>(emptyList()) }
     var restrictedApps by remember { mutableStateOf<Map<String, DeviceAppRestrictionResponse>>(emptyMap()) }
+    var localRestrictedSet by remember { mutableStateOf(readRestrictedPackages(context)) }
+
     var isLoading by remember { mutableStateOf(true) }
     var errorMsg by remember { mutableStateOf<String?>(null) }
     var searchQuery by remember { mutableStateOf("") }
-    var selectedFilter by remember { mutableStateOf("ALL") }
+    var selectedTab by remember { mutableIntStateOf(0) }
     var selectedApp by remember { mutableStateOf<AppInventoryItem?>(null) }
-    val coroutineScope = rememberCoroutineScope()
+
+    var installBlocked by remember { mutableStateOf(false) }
+    var uninstallBlocked by remember { mutableStateOf(false) }
+    var policyLoaded by remember { mutableStateOf(false) }
+    var uninstallPackageName by remember { mutableStateOf("") }
+    var confirmForceUninstall by remember { mutableStateOf(false) }
 
     val surfaceBg = if (isDark) DarkBgSurface else BgSurface
+
+    fun isRestricted(packageName: String): Boolean {
+        return restrictedApps[packageName]?.restricted == true || localRestrictedSet.contains(packageName)
+    }
+
+    suspend fun refreshRestrictionState() {
+        val restrictedResp = RetrofitClient.api.getRestrictedApps(deviceId)
+        if (restrictedResp.isSuccessful) {
+            val backendRestricted = (restrictedResp.body() ?: emptyList()).associateBy { it.packageName }
+            restrictedApps = backendRestricted
+            val mergedRestricted = backendRestricted.values
+                .filter { it.restricted }
+                .map { it.packageName }
+                .toSet() + localRestrictedSet
+            localRestrictedSet = mergedRestricted
+            saveRestrictedPackages(context, mergedRestricted)
+        }
+    }
 
     LaunchedEffect(deviceId) {
         isLoading = true
         try {
-            val response = RemoteDataSource.getAppInventory(deviceId)
-            if (response.isSuccessful) {
-                apps = response.body() ?: emptyList()
+            val inventoryResp = RetrofitClient.api.getAppInventory(deviceId)
+            if (inventoryResp.isSuccessful) {
+                apps = inventoryResp.body() ?: emptyList()
                 errorMsg = null
             } else {
-                errorMsg = "Failed to load apps (${response.code()})"
+                errorMsg = "Failed to load apps (${inventoryResp.code()})"
             }
-            // Load restricted apps
-            val restrictResp = RemoteDataSource.getRestrictedApps(deviceId)
-            if (restrictResp.isSuccessful) {
-                restrictedApps = (restrictResp.body() ?: emptyList()).associateBy { it.packageName }
+
+            refreshRestrictionState()
+
+            val policyResp = RetrofitClient.api.getDevicePolicies(deviceId)
+            if (policyResp.isSuccessful && policyResp.body() != null) {
+                val policy = policyResp.body()!!
+                installBlocked = policy.installBlocked
+                uninstallBlocked = policy.uninstallBlocked
+                policyLoaded = true
             }
         } catch (e: Exception) {
             errorMsg = "Failed to load apps. Check connection."
-            Log.e("AppsTab", "Error fetching apps: ${e.message}")
+            Log.e("AppsTab", "Error loading APPS tab: ${e.message}")
         }
         isLoading = false
     }
 
     if (isLoading) {
         Box(
-            modifier = Modifier.fillMaxWidth().padding(32.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(32.dp),
             contentAlignment = Alignment.Center
         ) {
             CircularProgressIndicator(color = PurpleCore, modifier = Modifier.size(32.dp))
@@ -831,33 +893,45 @@ private fun AppsTab(deviceId: String, isDark: Boolean, textColor: Color) {
                 fontSize = 13.sp,
                 color = Danger,
                 textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth().padding(24.dp)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(24.dp)
             )
         }
         return
     }
 
-    val userApps = apps.filter { it.isSystemApp != true }
-    val systemApps = apps.filter { it.isSystemApp == true }
+    val userApps by remember(apps) { derivedStateOf { apps.filter { it.isSystemApp != true } } }
+    val systemApps by remember(apps) { derivedStateOf { apps.filter { it.isSystemApp == true } } }
+    val restrictedOnly by remember(apps, restrictedApps, localRestrictedSet) {
+        derivedStateOf { apps.filter { isRestricted(it.packageName) } }
+    }
+
+    val tabs = listOf(
+        AppTab("ALL", apps.size),
+        AppTab("USER", userApps.size),
+        AppTab("SYSTEM", systemApps.size),
+        AppTab("RESTRICTED", restrictedOnly.size)
+    )
 
     val filteredApps = apps.filter { app ->
         val matchesSearch = app.appName.contains(searchQuery, ignoreCase = true) ||
-                app.packageName.contains(searchQuery, ignoreCase = true)
-        val matchesFilter = when (selectedFilter) {
-            "ALL" -> true
-            "USER" -> app.isSystemApp != true
-            "SYSTEM" -> app.isSystemApp == true
+            app.packageName.contains(searchQuery, ignoreCase = true)
+        val matchesTab = when (selectedTab) {
+            0 -> true
+            1 -> app.isSystemApp != true
+            2 -> app.isSystemApp == true
+            3 -> isRestricted(app.packageName)
             else -> true
         }
-        matchesSearch && matchesFilter
+        matchesSearch && matchesTab
     }
 
     Column {
-        // Summary header
         SectionHeader(title = "INSTALLED APPLICATIONS", isDark = isDark)
         Spacer(Modifier.height(4.dp))
         Text(
-            "${apps.size} apps · ${userApps.size} user · ${systemApps.size} system",
+            "${apps.size} apps · ${userApps.size} user · ${systemApps.size} system · ${restrictedOnly.size} restricted",
             fontFamily = JetBrainsMono,
             fontSize = 10.sp,
             color = TextMuted
@@ -865,7 +939,132 @@ private fun AppsTab(deviceId: String, isDark: Boolean, textColor: Color) {
 
         Spacer(Modifier.height(12.dp))
 
-        // Search bar
+        DevoraCard(accentColor = PurpleCore, isDark = isDark) {
+            SectionHeader(title = "APP POLICY CONTROLS", isDark = isDark)
+            Spacer(Modifier.height(8.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Block App Installs", fontFamily = PlusJakartaSans, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = textColor)
+                    Text("Prevent new installations", fontFamily = DMSans, fontSize = 11.sp, color = TextMuted)
+                }
+                Switch(
+                    checked = installBlocked,
+                    enabled = policyLoaded,
+                    onCheckedChange = { enabled ->
+                        installBlocked = enabled
+                        coroutineScope.launch {
+                            try {
+                                val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
+                                if (dpm.isDeviceOwnerApp(context.packageName)) {
+                                    val adminComponent = AdminReceiver.getComponentName(context)
+                                    if (enabled) {
+                                        dpm.addUserRestriction(adminComponent, android.os.UserManager.DISALLOW_INSTALL_APPS)
+                                    } else {
+                                        dpm.clearUserRestriction(adminComponent, android.os.UserManager.DISALLOW_INSTALL_APPS)
+                                    }
+                                }
+                                RetrofitClient.api.updateDevicePolicy(
+                                    deviceId,
+                                    PolicyUpdateRequest(installBlocked = enabled)
+                                )
+                            } catch (e: Exception) {
+                                Log.e("AppsTab", "Install policy update failed: ${e.message}")
+                            }
+                        }
+                    }
+                )
+            }
+
+            Spacer(Modifier.height(10.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Block App Uninstalls", fontFamily = PlusJakartaSans, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = textColor)
+                    Text("Prevent app removal", fontFamily = DMSans, fontSize = 11.sp, color = TextMuted)
+                }
+                Switch(
+                    checked = uninstallBlocked,
+                    enabled = policyLoaded,
+                    onCheckedChange = { enabled ->
+                        uninstallBlocked = enabled
+                        coroutineScope.launch {
+                            try {
+                                val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
+                                if (dpm.isDeviceOwnerApp(context.packageName)) {
+                                    val adminComponent = AdminReceiver.getComponentName(context)
+                                    if (enabled) {
+                                        dpm.addUserRestriction(adminComponent, android.os.UserManager.DISALLOW_UNINSTALL_APPS)
+                                    } else {
+                                        dpm.clearUserRestriction(adminComponent, android.os.UserManager.DISALLOW_UNINSTALL_APPS)
+                                    }
+                                }
+                                RetrofitClient.api.updateDevicePolicy(
+                                    deviceId,
+                                    PolicyUpdateRequest(uninstallBlocked = enabled)
+                                )
+                            } catch (e: Exception) {
+                                Log.e("AppsTab", "Uninstall policy update failed: ${e.message}")
+                            }
+                        }
+                    }
+                )
+            }
+
+            Spacer(Modifier.height(12.dp))
+            HorizontalDivider(color = PurpleCore.copy(alpha = 0.12f), thickness = 1.dp)
+            Spacer(Modifier.height(12.dp))
+
+            Text("Force Uninstall App", fontFamily = PlusJakartaSans, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = Danger)
+            Spacer(Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(42.dp)
+                        .background(surfaceBg, RoundedCornerShape(10.dp))
+                        .border(1.dp, PurpleBorder, RoundedCornerShape(10.dp))
+                        .padding(horizontal = 12.dp),
+                    contentAlignment = Alignment.CenterStart
+                ) {
+                    if (uninstallPackageName.isBlank()) {
+                        Text("package name", fontFamily = DMSans, fontSize = 12.sp, color = TextMuted)
+                    }
+                    BasicTextField(
+                        value = uninstallPackageName,
+                        onValueChange = { uninstallPackageName = it },
+                        singleLine = true,
+                        textStyle = TextStyle(fontFamily = JetBrainsMono, fontSize = 12.sp, color = textColor),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Danger.copy(alpha = 0.12f))
+                        .border(1.dp, Danger.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
+                        .clickable(enabled = uninstallPackageName.isNotBlank()) { confirmForceUninstall = true }
+                        .padding(horizontal = 12.dp, vertical = 10.dp)
+                ) {
+                    Text("Uninstall", fontFamily = JetBrainsMono, fontWeight = FontWeight.Bold, fontSize = 11.sp, color = Danger)
+                }
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -875,34 +1074,17 @@ private fun AppsTab(deviceId: String, isDark: Boolean, textColor: Color) {
                 .padding(horizontal = 14.dp),
             contentAlignment = Alignment.CenterStart
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.Search,
-                    contentDescription = null,
-                    tint = PurpleCore,
-                    modifier = Modifier.size(20.dp)
-                )
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                Icon(imageVector = Icons.Filled.Search, contentDescription = null, tint = PurpleCore, modifier = Modifier.size(20.dp))
                 Spacer(modifier = Modifier.width(10.dp))
                 Box(modifier = Modifier.weight(1f)) {
                     if (searchQuery.isEmpty()) {
-                        Text(
-                            text = "Search apps...",
-                            fontFamily = DMSans,
-                            fontSize = 13.sp,
-                            color = TextMuted
-                        )
+                        Text(text = "Search apps...", fontFamily = DMSans, fontSize = 13.sp, color = TextMuted)
                     }
                     BasicTextField(
                         value = searchQuery,
                         onValueChange = { searchQuery = it },
-                        textStyle = TextStyle(
-                            fontFamily = DMSans,
-                            fontSize = 13.sp,
-                            color = textColor
-                        ),
+                        textStyle = TextStyle(fontFamily = DMSans, fontSize = 13.sp, color = textColor),
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -912,9 +1094,7 @@ private fun AppsTab(deviceId: String, isDark: Boolean, textColor: Color) {
                         imageVector = Icons.Filled.Close,
                         contentDescription = "Clear search",
                         tint = TextMuted,
-                        modifier = Modifier
-                            .size(18.dp)
-                            .clickable { searchQuery = "" }
+                        modifier = Modifier.size(18.dp).clickable { searchQuery = "" }
                     )
                 }
             }
@@ -922,47 +1102,96 @@ private fun AppsTab(deviceId: String, isDark: Boolean, textColor: Color) {
 
         Spacer(Modifier.height(10.dp))
 
-        // Filter chips
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            val filters = listOf(
-                "ALL" to apps.size,
-                "USER" to userApps.size,
-                "SYSTEM" to systemApps.size
-            )
-            filters.forEach { (label, count) ->
-                val isSelected = selectedFilter == label
-                Box(
-                    modifier = Modifier
-                        .background(
-                            if (isSelected) PurpleCore.copy(alpha = 0.12f) else surfaceBg,
-                            RoundedCornerShape(20.dp)
-                        )
-                        .border(
-                            1.dp,
-                            if (isSelected) PurpleCore.copy(alpha = 0.40f) else PurpleCore.copy(alpha = 0.15f),
-                            RoundedCornerShape(20.dp)
-                        )
-                        .clickable { selectedFilter = label }
-                        .padding(horizontal = 16.dp, vertical = 8.dp)
+        ScrollableTabRow(
+            selectedTabIndex = selectedTab,
+            edgePadding = 12.dp,
+            containerColor = Color.Transparent,
+            contentColor = PurpleCore,
+            indicator = {},
+            divider = {}
+        ) {
+            tabs.forEachIndexed { index, tab ->
+                val isSelected = selectedTab == index
+                val isRestrictedTab = tab.label == "RESTRICTED"
+                val restrictedAccent = Color(0xFFF44336)
+
+                Tab(
+                    selected = isSelected,
+                    onClick = { selectedTab = index },
+                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp)
                 ) {
-                    Text(
-                        text = "$label ($count)",
-                        fontFamily = if (isSelected) PlusJakartaSans else DMSans,
-                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
-                        fontSize = 12.sp,
-                        color = if (isSelected) PurpleCore else TextMuted
-                    )
+                    Surface(
+                        shape = RoundedCornerShape(20.dp),
+                        color = if (isSelected) PurpleCore else Color.Transparent,
+                        border = androidx.compose.foundation.BorderStroke(
+                            1.dp,
+                            if (isSelected) PurpleCore else Color.LightGray
+                        ),
+                        modifier = Modifier.padding(horizontal = 2.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                text = tab.label,
+                                color = if (isSelected) Color.White else Color.Gray,
+                                fontSize = 12.sp,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                maxLines = 1
+                            )
+
+                            Surface(
+                                shape = CircleShape,
+                                color = if (isSelected) Color.White.copy(alpha = 0.3f)
+                                else if (isRestrictedTab) restrictedAccent.copy(alpha = 0.12f)
+                                else PurpleCore.copy(alpha = 0.1f)
+                            ) {
+                                Text(
+                                    text = "${tab.count}",
+                                    color = if (isSelected) Color.White
+                                    else if (isRestrictedTab) restrictedAccent
+                                    else PurpleCore,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
 
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(8.dp))
 
-        // App list
-        if (filteredApps.isEmpty()) {
+        if (selectedTab == 3 && restrictedOnly.isEmpty()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(40.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.Shield,
+                    contentDescription = null,
+                    tint = Color.LightGray,
+                    modifier = Modifier.size(48.dp)
+                )
+                Spacer(Modifier.height(12.dp))
+                Text("No Restricted Apps", color = Color.Gray, fontWeight = FontWeight.Medium)
+                Text(
+                    "Tap Restrict on any app\nto block it on this device",
+                    color = Color.LightGray,
+                    fontSize = 12.sp,
+                    textAlign = TextAlign.Center
+                )
+            }
+        } else if (filteredApps.isEmpty()) {
             Text(
-                if (searchQuery.isNotEmpty()) "No apps match your search."
-                else "No apps found on this device.",
+                if (searchQuery.isNotEmpty()) "No apps match your search." else "No apps found on this device.",
                 fontFamily = DMSans,
                 fontSize = 13.sp,
                 color = TextMuted,
@@ -971,8 +1200,9 @@ private fun AppsTab(deviceId: String, isDark: Boolean, textColor: Color) {
         }
 
         filteredApps.forEachIndexed { index, app ->
-            val isRestricted = restrictedApps[app.packageName]?.restricted == true
-            val appBg = if (isRestricted) Danger.copy(alpha = 0.05f) else Color.Transparent
+            val appRestricted = isRestricted(app.packageName)
+            val appBg = if (appRestricted) Color(0xFFFFF0F0) else Color.Transparent
+
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -982,18 +1212,18 @@ private fun AppsTab(deviceId: String, isDark: Boolean, textColor: Color) {
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    // Real app icon from base64 or fallback
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
                     val inlineIconBitmap = remember(app.iconBase64) {
                         if (!app.iconBase64.isNullOrEmpty()) {
                             try {
                                 val bytes = Base64.decode(app.iconBase64, Base64.DEFAULT)
                                 BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                            } catch (_: Exception) { null }
-                        } else null
+                            } catch (_: Exception) {
+                                null
+                            }
+                        } else {
+                            null
+                        }
                     }
 
                     if (inlineIconBitmap != null) {
@@ -1001,17 +1231,15 @@ private fun AppsTab(deviceId: String, isDark: Boolean, textColor: Color) {
                             bitmap = inlineIconBitmap.asImageBitmap(),
                             contentDescription = app.appName,
                             contentScale = ContentScale.Fit,
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(RoundedCornerShape(8.dp)),
-                            alpha = if (isRestricted) 0.4f else 1f
+                            modifier = Modifier.size(36.dp).clip(RoundedCornerShape(8.dp)),
+                            alpha = if (appRestricted) 0.4f else 1f
                         )
                     } else {
                         Box(
                             modifier = Modifier
                                 .size(36.dp)
                                 .clip(RoundedCornerShape(8.dp))
-                                .background(if (isRestricted) Danger.copy(alpha = 0.10f) else PurpleDim),
+                                .background(if (appRestricted) Danger.copy(alpha = 0.10f) else PurpleDim),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
@@ -1019,65 +1247,58 @@ private fun AppsTab(deviceId: String, isDark: Boolean, textColor: Color) {
                                 fontFamily = PlusJakartaSans,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 14.sp,
-                                color = if (isRestricted) Danger else PurpleCore
+                                color = if (appRestricted) Danger else PurpleCore
                             )
                         }
                     }
+
                     Spacer(Modifier.width(12.dp))
                     Column {
+                        Text(app.appName, fontFamily = DMSans, fontSize = 13.sp, color = if (appRestricted) Danger else textColor)
+                        if (appRestricted) {
+                            Text("🔴 SUSPENDED", fontFamily = JetBrainsMono, fontSize = 9.sp, color = Danger, fontWeight = FontWeight.Bold)
+                        }
+                        Text(app.packageName, fontFamily = JetBrainsMono, fontSize = 9.sp, color = TextMuted)
+                        val appType = if (app.isSystemApp == true) "System" else "User"
+                        val sourceLabel = formatInstallSource(app.installSource).ifBlank { "📱 Other Store" }
                         Text(
-                            app.appName,
+                            "v${app.versionName ?: "-"} · $appType · $sourceLabel",
                             fontFamily = DMSans,
-                            fontSize = 13.sp,
-                            color = if (isRestricted) Danger else textColor
-                        )
-                        Text(
-                            app.packageName,
-                            fontFamily = JetBrainsMono,
                             fontSize = 9.sp,
                             color = TextMuted
                         )
-                        val sourceLabel = formatInstallSource(app.installSource)
-                        if (sourceLabel.isNotEmpty()) {
-                            Text(
-                                sourceLabel,
-                                fontFamily = DMSans,
-                                fontSize = 9.sp,
-                                color = TextMuted
-                            )
-                        }
                     }
                 }
-                // Restrict / Allow toggle
+
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(100.dp))
                         .background(
-                            if (isRestricted) Success.copy(alpha = 0.10f)
+                            if (appRestricted) Success.copy(alpha = 0.10f)
                             else Danger.copy(alpha = 0.10f)
                         )
                         .border(
                             1.dp,
-                            if (isRestricted) Success.copy(alpha = 0.25f)
-                            else Danger.copy(alpha = 0.25f),
+                            if (appRestricted) Success.copy(alpha = 0.25f) else Danger.copy(alpha = 0.25f),
                             RoundedCornerShape(100.dp)
                         )
                         .clickable {
                             coroutineScope.launch {
                                 try {
+                                    val nextRestricted = !appRestricted
                                     val req = RestrictAppRequestNew(
                                         packageName = app.packageName,
                                         appName = app.appName,
                                         installSource = app.installSource,
-                                        restricted = !isRestricted
+                                        restricted = nextRestricted
                                     )
-                                    val resp = RemoteDataSource.restrictApp(deviceId, req)
+                                    val resp = RetrofitClient.api.restrictApp(deviceId, req)
                                     if (resp.isSuccessful) {
-                                        // Refresh restricted apps
-                                        val rResp = RemoteDataSource.getRestrictedApps(deviceId)
-                                        if (rResp.isSuccessful) {
-                                            restrictedApps = (rResp.body() ?: emptyList()).associateBy { it.packageName }
-                                        }
+                                        val updatedSet = localRestrictedSet.toMutableSet()
+                                        if (nextRestricted) updatedSet.add(app.packageName) else updatedSet.remove(app.packageName)
+                                        localRestrictedSet = updatedSet
+                                        saveRestrictedPackages(context, updatedSet)
+                                        refreshRestrictionState()
                                     }
                                 } catch (e: Exception) {
                                     Log.e("AppsTab", "Restrict toggle failed: ${e.message}")
@@ -1087,171 +1308,209 @@ private fun AppsTab(deviceId: String, isDark: Boolean, textColor: Color) {
                         .padding(horizontal = 8.dp, vertical = 4.dp)
                 ) {
                     Text(
-                        if (isRestricted) "Allow" else "Restrict",
+                        if (appRestricted) "✅ Allow" else "🚫 Restrict",
                         fontFamily = JetBrainsMono,
                         fontSize = 10.sp,
-                        color = if (isRestricted) Success else Danger,
+                        color = if (appRestricted) Success else Danger,
                         fontWeight = FontWeight.Bold
                     )
                 }
             }
+
             if (index < filteredApps.size - 1) {
                 HorizontalDivider(color = PurpleCore.copy(alpha = 0.08f), thickness = 1.dp)
             }
         }
+    }
 
-        // App details dialog
-        if (selectedApp != null) {
-            val app = selectedApp!!
-            val isAppRestricted = restrictedApps[app.packageName]?.restricted == true
-            Dialog(onDismissRequest = { selectedApp = null }, properties = DialogProperties()) {
-                DevoraCard(accentColor = if (isAppRestricted) Danger else PurpleCore, isDark = isDark) {
-                    Column(modifier = Modifier.padding(20.dp)) {
-                        // Header with app name + status badge
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            // Real app icon from base64 or fallback
-                            val dialogIconBitmap = remember(app.iconBase64) {
-                                if (!app.iconBase64.isNullOrEmpty()) {
-                                    try {
-                                        val bytes = Base64.decode(app.iconBase64, Base64.DEFAULT)
-                                        BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                                    } catch (_: Exception) { null }
-                                } else null
-                            }
-
-                            if (dialogIconBitmap != null) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(44.dp)
-                                        .clip(RoundedCornerShape(10.dp))
-                                        .background(
-                                            if (isAppRestricted) Danger.copy(alpha = 0.08f)
-                                            else Color.Transparent
-                                        )
-                                ) {
-                                    Image(
-                                        bitmap = dialogIconBitmap.asImageBitmap(),
-                                        contentDescription = app.appName,
-                                        contentScale = ContentScale.Fit,
-                                        modifier = Modifier
-                                            .size(44.dp)
-                                            .clip(RoundedCornerShape(10.dp)),
-                                        alpha = if (isAppRestricted) 0.4f else 1f
-                                    )
-                                    if (isAppRestricted) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(44.dp)
-                                                .clip(RoundedCornerShape(10.dp)),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Icon(
-                                                Icons.Outlined.Block,
-                                                contentDescription = null,
-                                                tint = Danger,
-                                                modifier = Modifier.size(18.dp)
-                                            )
-                                        }
-                                    }
-                                }
-                            } else {
-                                Box(
-                                    modifier = Modifier
-                                        .size(44.dp)
-                                        .clip(CircleShape)
-                                        .background(
-                                            if (isAppRestricted) Danger.copy(alpha = 0.10f)
-                                            else PurpleCore.copy(alpha = 0.10f)
-                                        ),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        if (isAppRestricted) Icons.Outlined.Block
-                                        else Icons.Outlined.Apps,
-                                        contentDescription = null,
-                                        tint = if (isAppRestricted) Danger else PurpleCore,
-                                        modifier = Modifier.size(22.dp)
-                                    )
-                                }
-                            }
-                            Spacer(Modifier.width(12.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = app.appName,
-                                    fontFamily = PlusJakartaSans,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 17.sp,
-                                    color = if (isAppRestricted) Danger else textColor
-                                )
-                                Text(
-                                    text = if (app.isSystemApp == true) "System App" else "User App",
-                                    fontFamily = JetBrainsMono,
-                                    fontSize = 10.sp,
-                                    color = TextMuted
-                                )
-                            }
-                            if (isAppRestricted) {
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(6.dp))
-                                        .background(Danger.copy(alpha = 0.12f))
-                                        .padding(horizontal = 8.dp, vertical = 3.dp)
-                                ) {
-                                    Text(
-                                        "BLOCKED",
-                                        fontFamily = JetBrainsMono,
-                                        fontSize = 9.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Danger
-                                    )
-                                }
-                            }
+    if (confirmForceUninstall) {
+        AlertDialog(
+            onDismissRequest = { confirmForceUninstall = false },
+            title = { Text("Force Uninstall", fontFamily = PlusJakartaSans, fontWeight = FontWeight.Bold) },
+            text = { Text("Force uninstall $uninstallPackageName?", fontFamily = DMSans) },
+            dismissButton = {
+                TextButton(onClick = { confirmForceUninstall = false }) { Text("Cancel") }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmForceUninstall = false
+                        try {
+                            val packageInstaller = context.packageManager.packageInstaller
+                            packageInstaller.uninstall(
+                                uninstallPackageName,
+                                PendingIntent.getBroadcast(
+                                    context,
+                                    0,
+                                    Intent("UNINSTALL_COMPLETE"),
+                                    PendingIntent.FLAG_IMMUTABLE
+                                ).intentSender
+                            )
+                        } catch (e: Exception) {
+                            Log.e("AppsTab", "Force uninstall failed: ${e.message}")
                         }
+                    }
+                ) {
+                    Text("Uninstall", color = Danger)
+                }
+            }
+        )
+    }
 
-                        Spacer(Modifier.height(16.dp))
-                        HorizontalDivider(color = PurpleCore.copy(alpha = 0.08f))
-                        Spacer(Modifier.height(12.dp))
+    if (selectedApp != null) {
+        val app = selectedApp!!
+        val appRestricted = isRestricted(app.packageName)
+        val appMeta = remember(app.packageName) {
+            resolveInstalledAppMeta(context, app.packageName, app.isSystemApp == true)
+        }
 
-                        // Info rows
-                        AppInfoRow("Package Name", app.packageName, textColor, isDark)
-                        if (!app.versionName.isNullOrBlank()) {
-                            AppInfoRow("App Version", "v${app.versionName}", textColor, isDark)
+        ModalBottomSheet(onDismissRequest = { selectedApp = null }) {
+            Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    val dialogIconBitmap = remember(app.iconBase64) {
+                        if (!app.iconBase64.isNullOrEmpty()) {
+                            try {
+                                val bytes = Base64.decode(app.iconBase64, Base64.DEFAULT)
+                                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                            } catch (_: Exception) {
+                                null
+                            }
+                        } else {
+                            null
                         }
-                        if (app.versionCode != null) {
-                            AppInfoRow("Version Code", app.versionCode.toString(), textColor, isDark)
-                        }
-                        // Installation Source — human readable
-                        val sourceRaw = app.installSource
-                        val sourceLabel = if (!sourceRaw.isNullOrBlank()) formatInstallSource(sourceRaw) else "Unknown"
-                        AppInfoRow("Installed From", sourceLabel, textColor, isDark)
-                        if (!sourceRaw.isNullOrBlank() && sourceRaw != sourceLabel) {
-                            AppInfoRow("Source Package", sourceRaw, textColor, isDark)
-                        }
+                    }
 
-                        Spacer(Modifier.height(16.dp))
-                        // Close button
+                    if (dialogIconBitmap != null) {
+                        Image(
+                            bitmap = dialogIconBitmap.asImageBitmap(),
+                            contentDescription = app.appName,
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier.size(64.dp).clip(RoundedCornerShape(12.dp))
+                        )
+                    } else {
                         Box(
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(PurpleCore.copy(alpha = 0.08f))
-                                .clickable { selectedApp = null }
-                                .padding(vertical = 10.dp),
+                                .size(64.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(PurpleCore.copy(alpha = 0.10f)),
                             contentAlignment = Alignment.Center
                         ) {
-                            Text(
-                                "Close",
-                                fontFamily = DMSans,
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 14.sp,
-                                color = PurpleCore
-                            )
+                            Icon(Icons.Outlined.Apps, contentDescription = null, tint = PurpleCore, modifier = Modifier.size(28.dp))
+                        }
+                    }
+
+                    Spacer(Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(app.appName, fontFamily = PlusJakartaSans, fontWeight = FontWeight.Bold, fontSize = 18.sp, color = textColor)
+                        Text(app.packageName, fontFamily = JetBrainsMono, fontSize = 10.sp, color = TextMuted)
+                        if (appRestricted) {
+                            Text("🔴 SUSPENDED", fontFamily = JetBrainsMono, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Danger)
                         }
                     }
                 }
+
+                Spacer(Modifier.height(14.dp))
+                HorizontalDivider(color = PurpleCore.copy(alpha = 0.10f))
+                Spacer(Modifier.height(10.dp))
+
+                Text("APP INFORMATION", fontFamily = JetBrainsMono, fontWeight = FontWeight.Bold, fontSize = 11.sp, color = TextMuted)
+                Spacer(Modifier.height(8.dp))
+
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                    Text("Package Name", fontFamily = DMSans, fontSize = 12.sp, color = TextMuted, modifier = Modifier.weight(0.35f))
+                    Text(app.packageName, fontFamily = JetBrainsMono, fontSize = 11.sp, color = textColor, modifier = Modifier.weight(0.55f))
+                    Icon(
+                        imageVector = Icons.Filled.ContentCopy,
+                        contentDescription = "Copy package",
+                        tint = PurpleCore,
+                        modifier = Modifier
+                            .size(18.dp)
+                            .weight(0.10f)
+                            .clickable {
+                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                clipboard.setPrimaryClip(ClipData.newPlainText("Package", app.packageName))
+                                Toast.makeText(context, "Package copied", Toast.LENGTH_SHORT).show()
+                            }
+                    )
+                }
+
+                AppInfoRow("Version Name", app.versionName ?: "Unavailable", textColor, isDark)
+                AppInfoRow("Version Code", app.versionCode?.toString() ?: "Unavailable", textColor, isDark)
+                AppInfoRow("App Type", if (app.isSystemApp == true) "👤 System App" else "👤 User App", textColor, isDark)
+                AppInfoRow("Installed From", appMeta.installSourceLabel, textColor, isDark)
+                AppInfoRow("Install Date", formatEpochDate(appMeta.firstInstallTime), textColor, isDark)
+                AppInfoRow("Last Updated", formatEpochDate(appMeta.lastUpdateTime), textColor, isDark)
+                AppInfoRow("App Size", formatBytes(appMeta.appSizeBytes), textColor, isDark)
+                AppInfoRow("Status", if (appRestricted) "🔴 RESTRICTED" else "✅ Active", textColor, isDark)
+
+                Spacer(Modifier.height(10.dp))
+                HorizontalDivider(color = PurpleCore.copy(alpha = 0.10f))
+                Spacer(Modifier.height(12.dp))
+
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(if (appRestricted) Success.copy(alpha = 0.12f) else Danger.copy(alpha = 0.12f))
+                            .border(
+                                1.dp,
+                                if (appRestricted) Success.copy(alpha = 0.35f) else Danger.copy(alpha = 0.35f),
+                                RoundedCornerShape(12.dp)
+                            )
+                            .clickable {
+                                coroutineScope.launch {
+                                    try {
+                                        val nextRestricted = !appRestricted
+                                        val req = RestrictAppRequestNew(
+                                            packageName = app.packageName,
+                                            appName = app.appName,
+                                            installSource = app.installSource,
+                                            restricted = nextRestricted
+                                        )
+                                        val resp = RetrofitClient.api.restrictApp(deviceId, req)
+                                        if (resp.isSuccessful) {
+                                            val updatedSet = localRestrictedSet.toMutableSet()
+                                            if (nextRestricted) updatedSet.add(app.packageName) else updatedSet.remove(app.packageName)
+                                            localRestrictedSet = updatedSet
+                                            saveRestrictedPackages(context, updatedSet)
+                                            refreshRestrictionState()
+                                        }
+                                    } catch (e: Exception) {
+                                        Log.e("AppsTab", "Bottom sheet restrict toggle failed: ${e.message}")
+                                    }
+                                }
+                            }
+                            .padding(vertical = 12.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            if (appRestricted) "✅ Allow" else "🚫 Restrict",
+                            fontFamily = JetBrainsMono,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp,
+                            color = if (appRestricted) Success else Danger
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Danger.copy(alpha = 0.12f))
+                            .border(1.dp, Danger.copy(alpha = 0.35f), RoundedCornerShape(12.dp))
+                            .clickable {
+                                uninstallPackageName = app.packageName
+                                confirmForceUninstall = true
+                            }
+                            .padding(vertical = 12.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("💣 Force Uninstall", fontFamily = JetBrainsMono, fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Danger)
+                    }
+                }
+
+                Spacer(Modifier.height(16.dp))
             }
         }
     }
@@ -1269,7 +1528,7 @@ private fun ActivityTab(deviceId: String, isDark: Boolean, textColor: Color) {
     LaunchedEffect(deviceId) {
         isLoading = true
         try {
-            val response = RemoteDataSource.getDeviceActivities(deviceId)
+            val response = RetrofitClient.api.getDeviceActivities(deviceId)
             if (response.isSuccessful) {
                 activities = response.body() ?: emptyList()
             }
@@ -1381,14 +1640,14 @@ private fun ActionsTab(
     // Load policies and location
     LaunchedEffect(deviceId) {
         try {
-            val pResp = RemoteDataSource.getDevicePolicies(deviceId)
+            val pResp = RetrofitClient.api.getDevicePolicies(deviceId)
             if (pResp.isSuccessful) {
                 cameraDisabled = pResp.body()?.cameraDisabled ?: false
                 policyLoaded = true
             }
         } catch (_: Exception) { }
         try {
-            val lResp = RemoteDataSource.getDeviceLocation(deviceId)
+            val lResp = RetrofitClient.api.getDeviceLocation(deviceId)
             if (lResp.isSuccessful) {
                 location = lResp.body()
             }
@@ -1415,7 +1674,7 @@ private fun ActionsTab(
                     coroutineScope.launch {
                         try {
                             val newVal = !cameraDisabled
-                            val resp = RemoteDataSource.updateDevicePolicy(
+                            val resp = RetrofitClient.api.updateDevicePolicy(
                                 deviceId,
                                 PolicyUpdateRequest(cameraDisabled = newVal)
                             )
@@ -1907,6 +2166,101 @@ private fun ConfirmActionDialog(
 // ══════════════════════════════════════
 // HELPER FUNCTIONS
 // ══════════════════════════════════════
+
+private data class InstalledAppMeta(
+    val firstInstallTime: Long?,
+    val lastUpdateTime: Long?,
+    val appSizeBytes: Long?,
+    val installSourceLabel: String
+)
+
+private fun readRestrictedPackages(context: Context): Set<String> {
+    val prefs = context.getSharedPreferences("devora_restrictions", Context.MODE_PRIVATE)
+    return prefs.getStringSet("restricted_packages", emptySet()) ?: emptySet()
+}
+
+private fun saveRestrictedPackages(context: Context, restrictedPackages: Set<String>) {
+    val prefs = context.getSharedPreferences("devora_restrictions", Context.MODE_PRIVATE)
+    prefs.edit().putStringSet("restricted_packages", restrictedPackages).apply()
+}
+
+private fun resolveInstalledAppMeta(
+    context: Context,
+    packageName: String,
+    isSystemApp: Boolean
+): InstalledAppMeta {
+    return try {
+        @Suppress("DEPRECATION")
+        val info = context.packageManager.getPackageInfo(packageName, 0)
+
+        val installerPackage = try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                context.packageManager.getInstallSourceInfo(packageName).installingPackageName
+            } else {
+                @Suppress("DEPRECATION")
+                context.packageManager.getInstallerPackageName(packageName)
+            }
+        } catch (_: Exception) {
+            null
+        }
+
+        val installSource = when (installerPackage) {
+            "com.android.vending" -> "📦 Play Store"
+            "com.bbk.appstore", "com.vivo.appstore", "com.vivo.store" -> "📦 Vivo Store"
+            "com.huawei.appmarket" -> "📦 Huawei Store"
+            "com.samsung.android.app.samsungapps" -> "📦 Samsung Store"
+            "com.xiaomi.market" -> "📦 Mi Store"
+            "com.android.chrome", "org.mozilla.firefox", "com.android.browser" -> "🌐 Browser/APK"
+            null -> if (isSystemApp) "🔧 Pre-installed" else "📲 ADB/Sideloaded"
+            else -> "📱 Other Store"
+        }
+
+        val sizeBytes = try {
+            val sourceDir = info.applicationInfo?.sourceDir
+            if (sourceDir.isNullOrBlank()) null else File(sourceDir).length()
+        } catch (_: Exception) {
+            null
+        }
+
+        InstalledAppMeta(
+            firstInstallTime = info.firstInstallTime,
+            lastUpdateTime = info.lastUpdateTime,
+            appSizeBytes = sizeBytes,
+            installSourceLabel = installSource
+        )
+    } catch (_: PackageManager.NameNotFoundException) {
+        InstalledAppMeta(
+            firstInstallTime = null,
+            lastUpdateTime = null,
+            appSizeBytes = null,
+            installSourceLabel = if (isSystemApp) "🔧 Pre-installed" else "📱 Other Store"
+        )
+    }
+}
+
+private fun formatEpochDate(epochMillis: Long?): String {
+    if (epochMillis == null || epochMillis <= 0L) return "Unavailable"
+    return try {
+        val formatter = SimpleDateFormat("dd MMM yyyy", Locale.getDefault())
+        formatter.format(Date(epochMillis))
+    } catch (_: Exception) {
+        "Unavailable"
+    }
+}
+
+private fun formatBytes(bytes: Long?): String {
+    if (bytes == null || bytes <= 0L) return "Unavailable"
+    val kb = 1024.0
+    val mb = kb * 1024.0
+    val gb = mb * 1024.0
+
+    return when {
+        bytes >= gb -> String.format(Locale.getDefault(), "%.2f GB", bytes / gb)
+        bytes >= mb -> String.format(Locale.getDefault(), "%.0f MB", bytes / mb)
+        bytes >= kb -> String.format(Locale.getDefault(), "%.0f KB", bytes / kb)
+        else -> "$bytes B"
+    }
+}
 
 private fun formatTimeAgo(isoDateTime: String?): String {
     if (isoDateTime.isNullOrEmpty()) return "just now"

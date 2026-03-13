@@ -32,6 +32,7 @@ public class AppInventoryService {
                         .versionCode(dto.getVersionCode())
                         .installSource(dto.getInstallSource())
                         .isSystemApp(dto.getIsSystemApp())
+                    .isSuspended(Boolean.TRUE.equals(dto.getIsSuspended()))
                         .iconBase64(dto.getIconBase64())
                         .collectedAt(LocalDateTime.now())
                         .build())

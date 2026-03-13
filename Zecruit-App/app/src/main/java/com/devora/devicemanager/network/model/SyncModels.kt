@@ -50,6 +50,7 @@ data class AppInfoDto(
     @SerializedName("versionCode") val versionCode: Long,
     @SerializedName("installSource") val installSource: String,
     @SerializedName("isSystemApp") val isSystemApp: Boolean,
+    @SerializedName("isSuspended") val isSuspended: Boolean,
     @SerializedName("iconBase64") val iconBase64: String
 )
 
