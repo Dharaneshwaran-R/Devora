@@ -25,6 +25,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -215,7 +216,7 @@ public class DeviceController {
 
     @PostMapping("/devices/{deviceId}/lock")
     public ResponseEntity<?> lockDevice(@PathVariable String deviceId) {
-        commandRepo.save(DeviceCommand.builder()
+        DeviceCommand command = commandRepo.save(DeviceCommand.builder()
                 .deviceId(deviceId).commandType("LOCK")
                 .executed(false).createdAt(LocalDateTime.now()).build());
         String employeeName = deviceRepo.findByDeviceId(deviceId)
@@ -228,13 +229,18 @@ public class DeviceController {
                 .deviceId(deviceId).employeeName(employeeName)
                 .alertType("DEVICE_LOCKED").message(employeeName + "'s Device locked remotely")
                 .isRead(false).severity("WARNING").createdAt(LocalDateTime.now()).build());
-        return ResponseEntity.ok(Map.of("message", "Lock command queued"));
+        Map<String, Object> response = new HashMap<>();
+        response.put("message", "Lock command queued");
+        response.put("commandId", command.getId());
+        response.put("status", "QUEUED");
+        response.put("commandType", "LOCK");
+        return ResponseEntity.ok(response);
     }
 
     @PostMapping("/devices/{deviceId}/wipe")
         @Transactional
     public ResponseEntity<?> wipeDevice(@PathVariable String deviceId) {
-        commandRepo.save(DeviceCommand.builder()
+                DeviceCommand command = commandRepo.save(DeviceCommand.builder()
                 .deviceId(deviceId).commandType("WIPE")
                 .executed(false).createdAt(LocalDateTime.now()).build());
         String employeeName = deviceRepo.findByDeviceId(deviceId)
@@ -247,7 +253,12 @@ public class DeviceController {
                 .deviceId(deviceId).employeeName(employeeName)
                 .alertType("WIPE_INITIATED").message(employeeName + "'s Device wipe initiated")
                 .isRead(false).severity("CRITICAL").createdAt(LocalDateTime.now()).build());
-        return ResponseEntity.ok(Map.of("message", "Wipe command queued"));
+        Map<String, Object> response = new HashMap<>();
+        response.put("message", "Wipe command queued");
+        response.put("commandId", command.getId());
+        response.put("status", "QUEUED");
+        response.put("commandType", "WIPE");
+        return ResponseEntity.ok(response);
     }
 
     @PostMapping("/devices/{deviceId}/command")
@@ -267,7 +278,7 @@ public class DeviceController {
                         commandType = "CLEAR_APP_DATA:" + packageName;
                 }
 
-        commandRepo.save(DeviceCommand.builder()
+        DeviceCommand command = commandRepo.save(DeviceCommand.builder()
                 .deviceId(deviceId)
                                 .commandType(commandType)
                 .packageName(packageName)
@@ -286,8 +297,34 @@ public class DeviceController {
                 .createdAt(LocalDateTime.now())
                 .build());
 
-        return ResponseEntity.ok(Map.of("message", type + " command queued"));
+                Map<String, Object> response = new HashMap<>();
+                response.put("message", type + " command queued");
+                response.put("commandId", command.getId());
+                response.put("status", "QUEUED");
+                response.put("commandType", commandType);
+                return ResponseEntity.ok(response);
     }
+
+        @GetMapping("/devices/{deviceId}/commands/{commandId}")
+        public ResponseEntity<?> getCommandStatus(
+                        @PathVariable String deviceId,
+                        @PathVariable Long commandId
+        ) {
+                return commandRepo.findById(commandId)
+                                .filter(cmd -> deviceId.equals(cmd.getDeviceId()))
+                                .map(cmd -> {
+                                        Map<String, Object> response = new HashMap<>();
+                                        response.put("id", cmd.getId());
+                                        response.put("deviceId", cmd.getDeviceId());
+                                        response.put("commandType", cmd.getCommandType());
+                                        response.put("executed", cmd.isExecuted());
+                                        response.put("status", cmd.isExecuted() ? "EXECUTED" : "QUEUED");
+                                        response.put("createdAt", cmd.getCreatedAt());
+                                        response.put("executedAt", cmd.getExecutedAt());
+                                        return ResponseEntity.ok(response);
+                                })
+                                .orElse(ResponseEntity.notFound().build());
+        }
 
     @GetMapping("/devices/{deviceId}/pending-commands")
     public ResponseEntity<List<DeviceCommand>> getPendingCommands(@PathVariable String deviceId) {

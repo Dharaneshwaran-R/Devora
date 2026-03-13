@@ -101,6 +101,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.devora.devicemanager.AdminReceiver
 import com.devora.devicemanager.network.AppInventoryItem
+import com.devora.devicemanager.network.CommandRequest
 import com.devora.devicemanager.network.DeviceActivityResponse
 import com.devora.devicemanager.network.DeviceAppRestrictionResponse
 import com.devora.devicemanager.network.DeviceLocationResponse
@@ -139,12 +140,6 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
-import retrofit2.Response
-import retrofit2.Retrofit
-import retrofit2.converter.gson.GsonConverterFactory
-import retrofit2.http.Body
-import retrofit2.http.POST
-import retrofit2.http.Path
 
 // ══════════════════════════════════════
 // DEVICE DETAIL SCREEN
@@ -220,6 +215,103 @@ fun DeviceDetailScreen(
     var wipeStep by remember { mutableIntStateOf(0) }
     var wipeConfirmText by remember { mutableStateOf("") }
     var isSyncing by remember { mutableStateOf(false) }
+    var commandProgressVisible by remember { mutableStateOf(false) }
+    var commandProgressTitle by remember { mutableStateOf("Sending Command") }
+    var commandProgressMessage by remember { mutableStateOf("Waiting for device to execute...") }
+
+    suspend fun executeRemoteCommandAndWait(
+        commandType: String,
+        packageName: String? = null,
+        pendingMessage: String,
+        successMessage: String,
+        timeoutMs: Long = 20_000L,
+        timeoutMessage: String = "Command sent. Device will apply shortly."
+    ): Boolean {
+        commandProgressTitle = pendingMessage
+        commandProgressMessage = "Sending command to device..."
+        commandProgressVisible = true
+
+        return try {
+            val beforePending = apiService.getPendingCommands(deviceId).body().orEmpty()
+            val beforeIds = beforePending.map { it.id }.toSet()
+
+            val queueResponse = when (commandType) {
+                "LOCK" -> apiService.lockDevice(deviceId)
+                "WIPE" -> apiService.wipeDevice(deviceId)
+                else -> apiService.createDeviceCommand(deviceId, CommandRequest(commandType, packageName))
+            }
+
+            val queued = queueResponse.isSuccessful
+            var commandId = queueResponse.body()?.commandId
+
+            fun matchesCommandType(remoteType: String?): Boolean {
+                if (remoteType.isNullOrBlank()) return false
+                return if (commandType == "CLEAR_APP_DATA") {
+                    remoteType.startsWith("CLEAR_APP_DATA:")
+                } else {
+                    remoteType == commandType
+                }
+            }
+
+            if (!queued) {
+                snackbarHostState.showSnackbar("Failed to send $commandType command")
+                return false
+            }
+
+            // Backward-compatible fallback for servers that don't return commandId.
+            if (commandId == null) {
+                for (i in 1..8) {
+                    delay(500)
+                    val pending = apiService.getPendingCommands(deviceId).body().orEmpty()
+                    val candidate = pending.firstOrNull { cmd ->
+                        !beforeIds.contains(cmd.id) && matchesCommandType(cmd.commandType)
+                    }
+                    if (candidate != null) {
+                        commandId = candidate.id
+                        break
+                    }
+                }
+            }
+
+            val start = System.currentTimeMillis()
+            var attempt = 0
+
+            while (System.currentTimeMillis() - start < timeoutMs) {
+                attempt += 1
+                commandProgressMessage = "Waiting for device confirmation... (${attempt})"
+
+                if (commandId != null) {
+                    val statusResponse = apiService.getCommandStatus(deviceId, commandId!!)
+                    if (statusResponse.isSuccessful && statusResponse.body()?.executed == true) {
+                        snackbarHostState.showSnackbar(successMessage)
+                        return true
+                    }
+
+                    // Fallback for servers without command-status endpoint support.
+                    val pending = apiService.getPendingCommands(deviceId).body().orEmpty()
+                    val stillPending = pending.any { it.id == commandId }
+                    if (!stillPending) {
+                        snackbarHostState.showSnackbar(successMessage)
+                        return true
+                    }
+                } else {
+                    // If commandId couldn't be resolved, treat queueing as success once sent.
+                    snackbarHostState.showSnackbar("Command sent successfully")
+                    return true
+                }
+
+                delay(1500)
+            }
+
+            snackbarHostState.showSnackbar(timeoutMessage)
+            true
+        } catch (_: Exception) {
+            snackbarHostState.showSnackbar("Failed to send $commandType command")
+            false
+        } finally {
+            commandProgressVisible = false
+        }
+    }
 
     val bgColor = if (isDark) DarkBgBase else BgBase
     val textColor = if (isDark) DarkTextPrimary else TextPrimary
@@ -327,15 +419,11 @@ fun DeviceDetailScreen(
                         coroutineScope.launch {
                             isSyncing = true
                             try {
-                                val sent = sendDeviceCommand(deviceId, "FORCE_SYNC")
-                                if (sent) {
-                                    delay(3000)
-                                    snackbarHostState.showSnackbar("Sync command sent to device")
-                                } else {
-                                    snackbarHostState.showSnackbar("Failed to send sync command")
-                                }
-                            } catch (_: Exception) {
-                                snackbarHostState.showSnackbar("Failed to send sync command")
+                                executeRemoteCommandAndWait(
+                                    commandType = "FORCE_SYNC",
+                                    pendingMessage = "Syncing ${device.name}",
+                                    successMessage = "Sync completed on ${device.name}"
+                                )
                             } finally {
                                 isSyncing = false
                             }
@@ -369,16 +457,13 @@ fun DeviceDetailScreen(
             onConfirm = {
                 showLockDialog = false
                 coroutineScope.launch {
-                    try {
-                        val resp = apiService.lockDevice(deviceId)
-                        if (resp.isSuccessful) {
-                            snackbarHostState.showSnackbar("Lock command sent to device")
-                        } else {
-                            snackbarHostState.showSnackbar("Failed to send lock command")
-                        }
-                    } catch (_: Exception) {
-                        snackbarHostState.showSnackbar("Failed to send lock command")
-                    }
+                    executeRemoteCommandAndWait(
+                        commandType = "LOCK",
+                        pendingMessage = "Locking ${device.name}",
+                        successMessage = "${device.name} locked successfully",
+                        timeoutMs = 10_000L,
+                        timeoutMessage = "Lock command sent. Emulator may not visibly turn off immediately."
+                    )
                 }
             }
         )
@@ -398,16 +483,11 @@ fun DeviceDetailScreen(
             onConfirm = {
                 showPasswordDialog = false
                 coroutineScope.launch {
-                    try {
-                        val sent = sendDeviceCommand(deviceId, "FORCE_PASSWORD_RESET")
-                        if (sent) {
-                            snackbarHostState.showSnackbar("Password reset forced on ${device.name}")
-                        } else {
-                            snackbarHostState.showSnackbar("Failed to send password reset command")
-                        }
-                    } catch (_: Exception) {
-                        snackbarHostState.showSnackbar("Failed to send password reset command")
-                    }
+                    executeRemoteCommandAndWait(
+                        commandType = "FORCE_PASSWORD_RESET",
+                        pendingMessage = "Resetting password on ${device.name}",
+                        successMessage = "Password reset applied on ${device.name}"
+                    )
                 }
             }
         )
@@ -493,20 +573,12 @@ fun DeviceDetailScreen(
                                 showClearDataDialog = false
                                 clearDataPackage = ""
                                 coroutineScope.launch {
-                                    try {
-                                        val sent = sendDeviceCommand(
-                                            deviceId = deviceId,
-                                            commandType = "CLEAR_APP_DATA",
-                                            packageName = packageName
-                                        )
-                                        if (sent) {
-                                            snackbarHostState.showSnackbar("App data clear command sent")
-                                        } else {
-                                            snackbarHostState.showSnackbar("Failed to send clear-data command")
-                                        }
-                                    } catch (_: Exception) {
-                                        snackbarHostState.showSnackbar("Failed to send clear-data command")
-                                    }
+                                    executeRemoteCommandAndWait(
+                                        commandType = "CLEAR_APP_DATA",
+                                        packageName = packageName,
+                                        pendingMessage = "Clearing app data on ${device.name}",
+                                        successMessage = "App data clear command executed"
+                                    )
                                 }
                             },
                             enabled = clearDataPackage.isNotBlank(),
@@ -603,6 +675,33 @@ fun DeviceDetailScreen(
                                     fontFamily = DMSans,
                                     fontSize = 12.sp,
                                     color = Danger.copy(alpha = 0.8f)
+                                )
+                            }
+                        }
+
+                        Spacer(Modifier.height(10.dp))
+
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Warning.copy(alpha = 0.10f))
+                                .border(1.dp, Warning.copy(alpha = 0.25f), RoundedCornerShape(10.dp))
+                                .padding(12.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.Top) {
+                                Icon(
+                                    Icons.Outlined.Warning,
+                                    contentDescription = null,
+                                    tint = Warning,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    "Emulator note: some Android emulator images block full factory reset. On real managed devices, wipe will reboot and erase data.",
+                                    fontFamily = DMSans,
+                                    fontSize = 12.sp,
+                                    color = Warning
                                 )
                             }
                         }
@@ -747,16 +846,31 @@ fun DeviceDetailScreen(
                                         showWipeDialog = false
                                         wipeStep = 0
                                         coroutineScope.launch {
+                                            commandProgressTitle = "Dispatching wipe command"
+                                            commandProgressMessage = "Sending command to device..."
+                                            commandProgressVisible = true
+
                                             try {
-                                                val resp = apiService.wipeDevice(deviceId)
-                                                if (resp.isSuccessful) {
-                                                    snackbarHostState.showSnackbar("${device.name} wipe initiated")
-                                                    onBack()
+                                                val response = apiService.wipeDevice(deviceId)
+                                                if (response.isSuccessful) {
+                                                    val isEmulator = Build.FINGERPRINT.contains("generic", ignoreCase = true) ||
+                                                        Build.MODEL.contains("Emulator", ignoreCase = true) ||
+                                                        Build.PRODUCT.contains("sdk", ignoreCase = true)
+
+                                                    val statusText = if (isEmulator) {
+                                                        "Wipe command queued. This emulator may not allow actual factory reset."
+                                                    } else {
+                                                        "Wipe command queued. Device will reboot to complete reset."
+                                                    }
+
+                                                    snackbarHostState.showSnackbar(statusText)
                                                 } else {
                                                     snackbarHostState.showSnackbar("Failed to send wipe command")
                                                 }
                                             } catch (_: Exception) {
                                                 snackbarHostState.showSnackbar("Failed to send wipe command")
+                                            } finally {
+                                                commandProgressVisible = false
                                             }
                                         }
                                     },
@@ -772,6 +886,43 @@ fun DeviceDetailScreen(
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+
+    if (commandProgressVisible) {
+        Dialog(
+            onDismissRequest = {},
+            properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false)
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(0.85f)
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(surfaceBg)
+                    .border(1.dp, PurpleBorder, RoundedCornerShape(18.dp))
+                    .padding(20.dp)
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    CircularProgressIndicator(color = PurpleCore, strokeWidth = 3.dp)
+                    Spacer(Modifier.height(14.dp))
+                    Text(
+                        text = commandProgressTitle,
+                        fontFamily = PlusJakartaSans,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp,
+                        color = textColor,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = commandProgressMessage,
+                        fontFamily = DMSans,
+                        fontSize = 12.sp,
+                        color = TextMuted,
+                        textAlign = TextAlign.Center
+                    )
                 }
             }
         }
@@ -2574,37 +2725,6 @@ private fun getTimeAgo(isoTimestamp: String, currentTime: Long): String {
     } catch (_: Exception) {
         "Unknown"
     }
-}
-
-private data class CommandRequest(
-    val type: String,
-    val packageName: String? = null
-)
-
-private interface DeviceCommandApi {
-    @POST("api/devices/{deviceId}/command")
-    suspend fun sendCommand(
-        @Path("deviceId") deviceId: String,
-        @Body body: CommandRequest
-    ): Response<Map<String, String>>
-}
-
-private suspend fun sendDeviceCommand(
-    deviceId: String,
-    commandType: String,
-    packageName: String? = null
-): Boolean {
-    val commandApi = Retrofit.Builder()
-        .baseUrl("https://devora-production-dd2e.up.railway.app/")
-        .addConverterFactory(GsonConverterFactory.create())
-        .build()
-        .create(DeviceCommandApi::class.java)
-
-    val response = commandApi.sendCommand(
-        deviceId = deviceId,
-        body = CommandRequest(type = commandType, packageName = packageName)
-    )
-    return response.isSuccessful
 }
 
 @Composable

@@ -187,6 +187,28 @@ data class DeviceCommandResponse(
     @SerializedName("executedAt") val executedAt: String?
 )
 
+data class CommandRequest(
+    @SerializedName("type") val type: String,
+    @SerializedName("packageName") val packageName: String? = null
+)
+
+data class CommandQueueResponse(
+    @SerializedName("message") val message: String?,
+    @SerializedName("commandId") val commandId: Long?,
+    @SerializedName("status") val status: String?,
+    @SerializedName("commandType") val commandType: String?
+)
+
+data class CommandStatusResponse(
+    @SerializedName("id") val id: Long,
+    @SerializedName("deviceId") val deviceId: String?,
+    @SerializedName("commandType") val commandType: String?,
+    @SerializedName("executed") val executed: Boolean,
+    @SerializedName("status") val status: String?,
+    @SerializedName("createdAt") val createdAt: String?,
+    @SerializedName("executedAt") val executedAt: String?
+)
+
 data class UnreadCountResponse(
     @SerializedName("count") val count: Int
 )
@@ -405,12 +427,24 @@ interface EnrollmentApiService {
     @POST("api/devices/{deviceId}/lock")
     suspend fun lockDevice(
         @Path("deviceId") deviceId: String
-    ): Response<Map<String, String>>
+    ): Response<CommandQueueResponse>
 
     @POST("api/devices/{deviceId}/wipe")
     suspend fun wipeDevice(
         @Path("deviceId") deviceId: String
-    ): Response<Map<String, String>>
+    ): Response<CommandQueueResponse>
+
+    @POST("api/devices/{deviceId}/command")
+    suspend fun createDeviceCommand(
+        @Path("deviceId") deviceId: String,
+        @Body request: CommandRequest
+    ): Response<CommandQueueResponse>
+
+    @GET("api/devices/{deviceId}/commands/{commandId}")
+    suspend fun getCommandStatus(
+        @Path("deviceId") deviceId: String,
+        @Path("commandId") commandId: Long
+    ): Response<CommandStatusResponse>
 
     @GET("api/devices/{deviceId}/pending-commands")
     suspend fun getPendingCommands(

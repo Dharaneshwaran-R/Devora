@@ -19,7 +19,7 @@ import com.devora.devicemanager.network.RetrofitClient
 import java.util.concurrent.TimeUnit
 
 /**
- * Worker (reschedules itself every 5 minutes) that enforces MDM policies:
+ * Worker (reschedules itself every few seconds) that enforces MDM policies:
  *  1. App restrictions   — setPackagesSuspended() per restricted app
  *  2. Camera policy      — setCameraDisabled()
  *  3. Install/uninstall  — addUserRestriction(DISALLOW_INSTALL/UNINSTALL_APPS)
@@ -41,7 +41,7 @@ class PolicySyncWorker(
 
             val request = OneTimeWorkRequestBuilder<PolicySyncWorker>()
                 .setConstraints(constraints)
-                .setInitialDelay(5, TimeUnit.MINUTES)
+                .setInitialDelay(5, TimeUnit.SECONDS)
                 .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
                 .build()
 
@@ -50,7 +50,7 @@ class PolicySyncWorker(
                 ExistingWorkPolicy.REPLACE,
                 request
             )
-            Log.d(TAG, "Policy sync worker scheduled (5m)")
+            Log.d(TAG, "Policy sync worker scheduled (5s)")
         }
     }
 
