@@ -6,6 +6,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
 
 public interface DeviceCommandRepository extends JpaRepository<DeviceCommand, Long> {
+    List<DeviceCommand> findByDeviceIdAndExecutedFalse(String deviceId);
     List<DeviceCommand> findByDeviceIdAndExecutedFalseOrderByCreatedAtAsc(String deviceId);
     @Transactional
     void deleteByDeviceId(String deviceId);

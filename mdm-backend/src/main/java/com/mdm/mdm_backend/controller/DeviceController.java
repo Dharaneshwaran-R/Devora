@@ -21,6 +21,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
@@ -231,6 +232,7 @@ public class DeviceController {
     }
 
     @PostMapping("/devices/{deviceId}/wipe")
+        @Transactional
     public ResponseEntity<?> wipeDevice(@PathVariable String deviceId) {
         commandRepo.save(DeviceCommand.builder()
                 .deviceId(deviceId).commandType("WIPE")
@@ -246,6 +248,45 @@ public class DeviceController {
                 .alertType("WIPE_INITIATED").message(employeeName + "'s Device wipe initiated")
                 .isRead(false).severity("CRITICAL").createdAt(LocalDateTime.now()).build());
         return ResponseEntity.ok(Map.of("message", "Wipe command queued"));
+    }
+
+    @PostMapping("/devices/{deviceId}/command")
+    public ResponseEntity<?> createCommand(
+            @PathVariable String deviceId,
+            @RequestBody Map<String, Object> body
+    ) {
+        String type = body.get("type") != null ? body.get("type").toString() : null;
+        String packageName = body.get("packageName") != null ? body.get("packageName").toString() : null;
+
+        if (type == null || type.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("message", "type is required"));
+        }
+
+                String commandType = type;
+                if ("CLEAR_APP_DATA".equals(type) && packageName != null && !packageName.isBlank()) {
+                        commandType = "CLEAR_APP_DATA:" + packageName;
+                }
+
+        commandRepo.save(DeviceCommand.builder()
+                .deviceId(deviceId)
+                                .commandType(commandType)
+                .packageName(packageName)
+                .executed(false)
+                .createdAt(LocalDateTime.now())
+                .build());
+
+        String employeeName = deviceRepo.findByDeviceId(deviceId)
+                .map(Device::getEmployeeName).orElse("Unknown");
+        activityRepo.save(DeviceActivity.builder()
+                .deviceId(deviceId)
+                .employeeName(employeeName)
+                .activityType(type)
+                .description(type + " command queued for " + employeeName + "'s Device")
+                .severity("WARNING")
+                .createdAt(LocalDateTime.now())
+                .build());
+
+        return ResponseEntity.ok(Map.of("message", type + " command queued"));
     }
 
     @GetMapping("/devices/{deviceId}/pending-commands")
@@ -264,6 +305,16 @@ public class DeviceController {
             return ResponseEntity.ok(Map.of("message", "Command acknowledged"));
         }).orElse(ResponseEntity.notFound().build());
     }
+
+        @PostMapping("/commands/{commandId}/executed")
+        public ResponseEntity<?> markCommandExecuted(@PathVariable Long commandId) {
+                return commandRepo.findById(commandId).map(cmd -> {
+                        cmd.setExecuted(true);
+                        cmd.setExecutedAt(LocalDateTime.now());
+                        commandRepo.save(cmd);
+                        return ResponseEntity.ok(Map.of("message", "Command marked as executed"));
+                }).orElse(ResponseEntity.notFound().build());
+        }
 
     // ════════════════════════════════════════
     // GPS LOCATION

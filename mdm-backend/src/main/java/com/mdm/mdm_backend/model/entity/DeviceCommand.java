@@ -19,6 +19,9 @@ public class DeviceCommand {
     @Column(nullable = false)
     private String commandType; // LOCK, WIPE, CAMERA_ENABLE, CAMERA_DISABLE
 
+    @Column
+    private String packageName;
+
     @Column(nullable = false)
     private boolean executed;
 

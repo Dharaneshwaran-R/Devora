@@ -23,12 +23,15 @@ public class ActivityController {
         return ResponseEntity.ok(result);
     }
 
-    @GetMapping("/activities/device/{deviceId}")
-    public ResponseEntity<List<DeviceActivity>> getDeviceActivities(@PathVariable String deviceId) {
+        @GetMapping("/activities/device/{deviceId}")
+        public ResponseEntity<List<DeviceActivity>> getDeviceActivities(
+            @PathVariable String deviceId,
+            @RequestParam(defaultValue = "20") int limit
+        ) {
         List<DeviceActivity> activities = activityRepository.findByDeviceIdOrderByCreatedAtDesc(deviceId);
         return ResponseEntity.ok(
                 activities.stream()
-                        .limit(10)
+                .limit(limit)
                         .collect(Collectors.toList()));
     }
 

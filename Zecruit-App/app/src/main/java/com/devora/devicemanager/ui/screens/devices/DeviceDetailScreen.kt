@@ -44,6 +44,7 @@ import androidx.compose.material.icons.outlined.Apps
 import androidx.compose.material.icons.outlined.Block
 import androidx.compose.material.icons.outlined.CameraAlt
 import androidx.compose.material.icons.outlined.CleaningServices
+import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.DeleteForever
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Info
@@ -58,6 +59,8 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Surface
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -75,6 +78,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -134,6 +138,13 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
+import retrofit2.Response
+import retrofit2.Retrofit
+import retrofit2.converter.gson.GsonConverterFactory
+import retrofit2.http.Body
+import retrofit2.http.POST
+import retrofit2.http.Path
 
 // ══════════════════════════════════════
 // DEVICE DETAIL SCREEN
@@ -145,6 +156,7 @@ fun DeviceDetailScreen(
     onBack: () -> Unit,
     isDark: Boolean
 ) {
+    val apiService = remember { RetrofitClient.api }
     // Fetch real device data from API
     var deviceResponse by remember { mutableStateOf<DeviceResponse?>(null) }
 
@@ -203,6 +215,7 @@ fun DeviceDetailScreen(
     var showLockDialog by remember { mutableStateOf(false) }
     var showPasswordDialog by remember { mutableStateOf(false) }
     var showClearDataDialog by remember { mutableStateOf(false) }
+    var clearDataPackage by remember { mutableStateOf("") }
     var showWipeDialog by remember { mutableStateOf(false) }
     var wipeStep by remember { mutableIntStateOf(0) }
     var wipeConfirmText by remember { mutableStateOf("") }
@@ -300,18 +313,32 @@ fun DeviceDetailScreen(
                 2 -> ActivityTab(deviceId = deviceId, isDark = isDark, textColor = textColor)
                 3 -> ActionsTab(
                     deviceId = deviceId,
+                    deviceName = device.name,
                     isDark = isDark,
                     textColor = textColor,
                     isSyncing = isSyncing,
+                    onShowMessage = { message ->
+                        coroutineScope.launch { snackbarHostState.showSnackbar(message) }
+                    },
                     onLock = { showLockDialog = true },
                     onPasswordReset = { showPasswordDialog = true },
                     onClearData = { showClearDataDialog = true },
                     onSync = {
                         coroutineScope.launch {
                             isSyncing = true
-                            delay(2000)
-                            isSyncing = false
-                            snackbarHostState.showSnackbar("✓ Sync complete")
+                            try {
+                                val sent = sendDeviceCommand(deviceId, "FORCE_SYNC")
+                                if (sent) {
+                                    delay(3000)
+                                    snackbarHostState.showSnackbar("Sync command sent to device")
+                                } else {
+                                    snackbarHostState.showSnackbar("Failed to send sync command")
+                                }
+                            } catch (_: Exception) {
+                                snackbarHostState.showSnackbar("Failed to send sync command")
+                            } finally {
+                                isSyncing = false
+                            }
                         }
                     },
                     onWipe = {
@@ -331,8 +358,8 @@ fun DeviceDetailScreen(
     // Lock Device Dialog
     if (showLockDialog) {
         ConfirmActionDialog(
-            title = "Lock Device",
-            message = "This will immediately lock the device screen. The employee will need to enter their PIN/password to unlock.",
+            title = "Lock ${device.name}?",
+            message = "This will immediately lock the device screen.",
             icon = Icons.Outlined.Lock,
             iconColor = PurpleCore,
             confirmText = "Lock Now",
@@ -343,14 +370,14 @@ fun DeviceDetailScreen(
                 showLockDialog = false
                 coroutineScope.launch {
                     try {
-                        val resp = RetrofitClient.api.lockDevice(deviceId)
+                        val resp = apiService.lockDevice(deviceId)
                         if (resp.isSuccessful) {
-                            snackbarHostState.showSnackbar("✓ Lock command sent")
+                            snackbarHostState.showSnackbar("Lock command sent to device")
                         } else {
-                            snackbarHostState.showSnackbar("✗ Failed to lock device")
+                            snackbarHostState.showSnackbar("Failed to send lock command")
                         }
-                    } catch (e: Exception) {
-                        snackbarHostState.showSnackbar("✗ Failed: ${e.message}")
+                    } catch (_: Exception) {
+                        snackbarHostState.showSnackbar("Failed to send lock command")
                     }
                 }
             }
@@ -371,7 +398,16 @@ fun DeviceDetailScreen(
             onConfirm = {
                 showPasswordDialog = false
                 coroutineScope.launch {
-                    snackbarHostState.showSnackbar("✓ Password reset initiated")
+                    try {
+                        val sent = sendDeviceCommand(deviceId, "FORCE_PASSWORD_RESET")
+                        if (sent) {
+                            snackbarHostState.showSnackbar("Password reset forced on ${device.name}")
+                        } else {
+                            snackbarHostState.showSnackbar("Failed to send password reset command")
+                        }
+                    } catch (_: Exception) {
+                        snackbarHostState.showSnackbar("Failed to send password reset command")
+                    }
                 }
             }
         )
@@ -379,22 +415,111 @@ fun DeviceDetailScreen(
 
     // Clear Data Dialog
     if (showClearDataDialog) {
-        ConfirmActionDialog(
-            title = "Clear App Data",
-            message = "All application data on the device will be wiped remotely. Installed apps will remain but user data within them will be cleared.",
-            icon = Icons.Outlined.CleaningServices,
-            iconColor = Warning,
-            confirmText = "Clear Data",
-            confirmColor = Warning,
-            isDark = isDark,
-            onDismiss = { showClearDataDialog = false },
-            onConfirm = {
-                showClearDataDialog = false
-                coroutineScope.launch {
-                    snackbarHostState.showSnackbar("✓ App data cleared")
+        Dialog(
+            onDismissRequest = { showClearDataDialog = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(0.90f)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(if (isDark) DarkBgSurface else BgSurface)
+                    .border(1.dp, PurpleBorder, RoundedCornerShape(20.dp))
+                    .padding(20.dp)
+            ) {
+                Column {
+                    Text(
+                        "Clear App Data",
+                        fontFamily = PlusJakartaSans,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp,
+                        color = textColor
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Enter package name to clear:",
+                        fontFamily = DMSans,
+                        fontSize = 13.sp,
+                        color = TextMuted
+                    )
+                    Spacer(Modifier.height(10.dp))
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(if (isDark) DarkBgElevated else BgElevated)
+                            .border(1.dp, PurpleBorder, RoundedCornerShape(10.dp))
+                            .padding(horizontal = 12.dp, vertical = 10.dp)
+                    ) {
+                        if (clearDataPackage.isBlank()) {
+                            Text(
+                                "com.example.app",
+                                fontFamily = DMSans,
+                                fontSize = 12.sp,
+                                color = TextMuted
+                            )
+                        }
+                        BasicTextField(
+                            value = clearDataPackage,
+                            onValueChange = { clearDataPackage = it },
+                            singleLine = true,
+                            textStyle = TextStyle(
+                                fontFamily = JetBrainsMono,
+                                fontSize = 12.sp,
+                                color = textColor
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+
+                    Spacer(Modifier.height(16.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = { showClearDataDialog = false },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Text("Cancel")
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                val packageName = clearDataPackage.trim()
+                                if (packageName.isBlank()) return@OutlinedButton
+                                showClearDataDialog = false
+                                clearDataPackage = ""
+                                coroutineScope.launch {
+                                    try {
+                                        val sent = sendDeviceCommand(
+                                            deviceId = deviceId,
+                                            commandType = "CLEAR_APP_DATA",
+                                            packageName = packageName
+                                        )
+                                        if (sent) {
+                                            snackbarHostState.showSnackbar("App data clear command sent")
+                                        } else {
+                                            snackbarHostState.showSnackbar("Failed to send clear-data command")
+                                        }
+                                    } catch (_: Exception) {
+                                        snackbarHostState.showSnackbar("Failed to send clear-data command")
+                                    }
+                                }
+                            },
+                            enabled = clearDataPackage.isNotBlank(),
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Warning)
+                        ) {
+                            Text("Clear Data", fontWeight = FontWeight.SemiBold)
+                        }
+                    }
                 }
             }
-        )
+        }
     }
 
     // Remote Wipe Dialog — TWO STEP
@@ -435,7 +560,7 @@ fun DeviceDetailScreen(
                     Spacer(Modifier.height(16.dp))
 
                     Text(
-                        if (wipeStep == 1) "Remote Wipe Device?" else "Final Confirmation",
+                        if (wipeStep == 1) "Wipe ${device.name}?" else "Type WIPE to confirm",
                         fontFamily = PlusJakartaSans,
                         fontWeight = FontWeight.Bold,
                         fontSize = 20.sp,
@@ -623,14 +748,15 @@ fun DeviceDetailScreen(
                                         wipeStep = 0
                                         coroutineScope.launch {
                                             try {
-                                                val resp = RetrofitClient.api.wipeDevice(deviceId)
+                                                val resp = apiService.wipeDevice(deviceId)
                                                 if (resp.isSuccessful) {
-                                                    snackbarHostState.showSnackbar("⚠ Device wipe command sent")
+                                                    snackbarHostState.showSnackbar("${device.name} wipe initiated")
+                                                    onBack()
                                                 } else {
-                                                    snackbarHostState.showSnackbar("✗ Failed to wipe device")
+                                                    snackbarHostState.showSnackbar("Failed to send wipe command")
                                                 }
-                                            } catch (e: Exception) {
-                                                snackbarHostState.showSnackbar("✗ Failed: ${e.message}")
+                                            } catch (_: Exception) {
+                                                snackbarHostState.showSnackbar("Failed to send wipe command")
                                             }
                                         }
                                     },
@@ -832,6 +958,22 @@ private fun AppsTab(deviceId: String, isDark: Boolean, textColor: Color) {
         return restrictedApps[packageName]?.restricted == true || localRestrictedSet.contains(packageName)
     }
 
+    fun applyLocalRestriction(packageName: String, restricted: Boolean): Boolean {
+        return try {
+            val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
+            if (!dpm.isDeviceOwnerApp(context.packageName)) {
+                true
+            } else {
+                val adminComponent = AdminReceiver.getComponentName(context)
+                dpm.setPackagesSuspended(adminComponent, arrayOf(packageName), restricted)
+                true
+            }
+        } catch (e: Exception) {
+            Log.e("AppsTab", "Local app restriction apply failed for $packageName: ${e.message}")
+            false
+        }
+    }
+
     suspend fun refreshRestrictionState() {
         val restrictedResp = RetrofitClient.api.getRestrictedApps(deviceId)
         if (restrictedResp.isSuccessful) {
@@ -843,6 +985,35 @@ private fun AppsTab(deviceId: String, isDark: Boolean, textColor: Color) {
                 .toSet() + localRestrictedSet
             localRestrictedSet = mergedRestricted
             saveRestrictedPackages(context, mergedRestricted)
+        }
+    }
+
+    suspend fun applyRestriction(packageName: String, appName: String, installSource: String?, restricted: Boolean): Boolean {
+        return try {
+            val req = RestrictAppRequestNew(
+                packageName = packageName,
+                appName = appName,
+                installSource = installSource,
+                restricted = restricted
+            )
+            val resp = RetrofitClient.api.restrictApp(deviceId, req)
+            if (!resp.isSuccessful) {
+                Log.e("AppsTab", "Backend restrict failed: ${resp.code()}")
+                return false
+            }
+
+            val localApplied = applyLocalRestriction(packageName, restricted)
+
+            val updatedSet = localRestrictedSet.toMutableSet()
+            if (restricted) updatedSet.add(packageName) else updatedSet.remove(packageName)
+            localRestrictedSet = updatedSet
+            saveRestrictedPackages(context, updatedSet)
+            refreshRestrictionState()
+
+            localApplied
+        } catch (e: Exception) {
+            Log.e("AppsTab", "Restrict toggle failed: ${e.message}")
+            false
         }
     }
 
@@ -1284,25 +1455,13 @@ private fun AppsTab(deviceId: String, isDark: Boolean, textColor: Color) {
                         )
                         .clickable {
                             coroutineScope.launch {
-                                try {
-                                    val nextRestricted = !appRestricted
-                                    val req = RestrictAppRequestNew(
-                                        packageName = app.packageName,
-                                        appName = app.appName,
-                                        installSource = app.installSource,
-                                        restricted = nextRestricted
-                                    )
-                                    val resp = RetrofitClient.api.restrictApp(deviceId, req)
-                                    if (resp.isSuccessful) {
-                                        val updatedSet = localRestrictedSet.toMutableSet()
-                                        if (nextRestricted) updatedSet.add(app.packageName) else updatedSet.remove(app.packageName)
-                                        localRestrictedSet = updatedSet
-                                        saveRestrictedPackages(context, updatedSet)
-                                        refreshRestrictionState()
-                                    }
-                                } catch (e: Exception) {
-                                    Log.e("AppsTab", "Restrict toggle failed: ${e.message}")
-                                }
+                                val nextRestricted = !appRestricted
+                                applyRestriction(
+                                    packageName = app.packageName,
+                                    appName = app.appName,
+                                    installSource = app.installSource,
+                                    restricted = nextRestricted
+                                )
                             }
                         }
                         .padding(horizontal = 8.dp, vertical = 4.dp)
@@ -1404,7 +1563,29 @@ private fun AppsTab(deviceId: String, isDark: Boolean, textColor: Color) {
                         Text(app.appName, fontFamily = PlusJakartaSans, fontWeight = FontWeight.Bold, fontSize = 18.sp, color = textColor)
                         Text(app.packageName, fontFamily = JetBrainsMono, fontSize = 10.sp, color = TextMuted)
                         if (appRestricted) {
-                            Text("🔴 SUSPENDED", fontFamily = JetBrainsMono, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Danger)
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = Color(0xFFFFF0F0)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Block,
+                                        contentDescription = null,
+                                        tint = Color(0xFFF44336),
+                                        modifier = Modifier.size(12.dp)
+                                    )
+                                    Spacer(Modifier.width(4.dp))
+                                    Text(
+                                        "Restricted",
+                                        color = Color(0xFFF44336),
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -1447,66 +1628,114 @@ private fun AppsTab(deviceId: String, isDark: Boolean, textColor: Color) {
                 HorizontalDivider(color = PurpleCore.copy(alpha = 0.10f))
                 Spacer(Modifier.height(12.dp))
 
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(if (appRestricted) Success.copy(alpha = 0.12f) else Danger.copy(alpha = 0.12f))
-                            .border(
-                                1.dp,
-                                if (appRestricted) Success.copy(alpha = 0.35f) else Danger.copy(alpha = 0.35f),
-                                RoundedCornerShape(12.dp)
-                            )
-                            .clickable {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (appRestricted) {
+                        OutlinedButton(
+                            onClick = {
                                 coroutineScope.launch {
-                                    try {
-                                        val nextRestricted = !appRestricted
-                                        val req = RestrictAppRequestNew(
-                                            packageName = app.packageName,
-                                            appName = app.appName,
-                                            installSource = app.installSource,
-                                            restricted = nextRestricted
-                                        )
-                                        val resp = RetrofitClient.api.restrictApp(deviceId, req)
-                                        if (resp.isSuccessful) {
-                                            val updatedSet = localRestrictedSet.toMutableSet()
-                                            if (nextRestricted) updatedSet.add(app.packageName) else updatedSet.remove(app.packageName)
-                                            localRestrictedSet = updatedSet
-                                            saveRestrictedPackages(context, updatedSet)
-                                            refreshRestrictionState()
-                                        }
-                                    } catch (e: Exception) {
-                                        Log.e("AppsTab", "Bottom sheet restrict toggle failed: ${e.message}")
-                                    }
+                                    applyRestriction(
+                                        packageName = app.packageName,
+                                        appName = app.appName,
+                                        installSource = app.installSource,
+                                        restricted = false
+                                    )
                                 }
-                            }
-                            .padding(vertical = 12.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            if (appRestricted) "✅ Allow" else "🚫 Restrict",
-                            fontFamily = JetBrainsMono,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 12.sp,
-                            color = if (appRestricted) Success else Danger
-                        )
+                            },
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                contentColor = Color(0xFF4CAF50)
+                            ),
+                            border = androidx.compose.foundation.BorderStroke(
+                                1.5.dp,
+                                Color(0xFF4CAF50)
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.CheckCircle,
+                                contentDescription = "Allow",
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                "Allow App",
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 14.sp
+                            )
+                        }
+                    } else {
+                        OutlinedButton(
+                            onClick = {
+                                coroutineScope.launch {
+                                    applyRestriction(
+                                        packageName = app.packageName,
+                                        appName = app.appName,
+                                        installSource = app.installSource,
+                                        restricted = true
+                                    )
+                                }
+                            },
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                contentColor = Color(0xFFFF5722)
+                            ),
+                            border = androidx.compose.foundation.BorderStroke(
+                                1.5.dp,
+                                Color(0xFFFF5722)
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Block,
+                                contentDescription = "Restrict",
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                "Restrict",
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 14.sp
+                            )
+                        }
                     }
 
-                    Box(
+                    OutlinedButton(
+                        onClick = {
+                            uninstallPackageName = app.packageName
+                            confirmForceUninstall = true
+                        },
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = Color(0xFFF44336)
+                        ),
+                        border = androidx.compose.foundation.BorderStroke(
+                            1.5.dp,
+                            Color(0xFFF44336)
+                        ),
+                        shape = RoundedCornerShape(12.dp),
                         modifier = Modifier
                             .weight(1f)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(Danger.copy(alpha = 0.12f))
-                            .border(1.dp, Danger.copy(alpha = 0.35f), RoundedCornerShape(12.dp))
-                            .clickable {
-                                uninstallPackageName = app.packageName
-                                confirmForceUninstall = true
-                            }
-                            .padding(vertical = 12.dp),
-                        contentAlignment = Alignment.Center
+                            .height(48.dp)
                     ) {
-                        Text("💣 Force Uninstall", fontFamily = JetBrainsMono, fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Danger)
+                        Icon(
+                            imageVector = Icons.Outlined.DeleteOutline,
+                            contentDescription = "Uninstall",
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            "Uninstall",
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 14.sp
+                        )
                     }
                 }
 
@@ -1524,18 +1753,37 @@ private fun AppsTab(deviceId: String, isDark: Boolean, textColor: Color) {
 private fun ActivityTab(deviceId: String, isDark: Boolean, textColor: Color) {
     var activities by remember { mutableStateOf<List<DeviceActivityResponse>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
+    var currentTime by remember { mutableLongStateOf(System.currentTimeMillis()) }
 
-    LaunchedEffect(deviceId) {
-        isLoading = true
+    suspend fun loadActivities() {
         try {
             val response = RetrofitClient.api.getDeviceActivities(deviceId)
             if (response.isSuccessful) {
                 activities = response.body() ?: emptyList()
             }
         } catch (e: Exception) {
-            Log.e("ActivityTab", "Failed to fetch activities: ${e.message}")
+            Log.e("ActivityTab", "Load failed: ${e.message}")
         }
+    }
+
+    LaunchedEffect(deviceId) {
+        isLoading = true
+        loadActivities()
         isLoading = false
+    }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(60_000L)
+            currentTime = System.currentTimeMillis()
+        }
+    }
+
+    LaunchedEffect(deviceId, Unit) {
+        while (true) {
+            delay(120_000L)
+            loadActivities()
+        }
     }
 
     if (isLoading) {
@@ -1603,9 +1851,9 @@ private fun ActivityTab(deviceId: String, isDark: Boolean, textColor: Color) {
                     }
                 }
                 Text(
-                    formatTimeAgo(activity.createdAt),
+                    getTimeAgo(activity.createdAt ?: "", currentTime),
                     fontFamily = JetBrainsMono,
-                    fontSize = 9.sp,
+                    fontSize = 11.sp,
                     color = TextMuted
                 )
             }
@@ -1623,9 +1871,11 @@ private fun ActivityTab(deviceId: String, isDark: Boolean, textColor: Color) {
 @Composable
 private fun ActionsTab(
     deviceId: String,
+    deviceName: String,
     isDark: Boolean,
     textColor: Color,
     isSyncing: Boolean,
+    onShowMessage: (String) -> Unit,
     onLock: () -> Unit,
     onPasswordReset: () -> Unit,
     onClearData: () -> Unit,
@@ -1680,8 +1930,15 @@ private fun ActionsTab(
                             )
                             if (resp.isSuccessful) {
                                 cameraDisabled = newVal
+                                    onShowMessage(
+                                        if (newVal) "Camera disabled on $deviceName" else "Camera enabled on $deviceName"
+                                    )
+                                } else {
+                                    onShowMessage("Failed to update camera policy")
                             }
-                        } catch (_: Exception) { }
+                            } catch (_: Exception) {
+                                onShowMessage("Failed to update camera policy")
+                            }
                     }
                 }
                 .padding(vertical = 14.dp),
@@ -2277,6 +2534,77 @@ private fun formatTimeAgo(isoDateTime: String?): String {
     } catch (_: Exception) {
         "just now"
     }
+}
+
+private fun getTimeAgo(isoTimestamp: String, currentTime: Long): String {
+    return try {
+        val formats = listOf(
+            "yyyy-MM-dd'T'HH:mm:ss.SSS",
+            "yyyy-MM-dd'T'HH:mm:ss",
+            "yyyy-MM-dd HH:mm:ss"
+        )
+        var date: Date? = null
+        for (format in formats) {
+            try {
+                val sdf = SimpleDateFormat(format, Locale.getDefault())
+                sdf.timeZone = TimeZone.getTimeZone("UTC")
+                date = sdf.parse(isoTimestamp)
+                if (date != null) break
+            } catch (_: Exception) {
+                continue
+            }
+        }
+
+        if (date == null) return "Unknown"
+
+        val diff = currentTime - date.time
+
+        when {
+            diff < 0 -> "Just now"
+            diff < 60_000L -> "Just now"
+            diff < 3_600_000L -> "${diff / 60_000L} min ago"
+            diff < 86_400_000L -> {
+                val h = diff / 3_600_000L
+                val m = (diff % 3_600_000L) / 60_000L
+                if (m > 0) "${h}h ${m}m ago" else "${h}h ago"
+            }
+            diff < 604_800_000L -> "${diff / 86_400_000L}d ago"
+            else -> SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(date)
+        }
+    } catch (_: Exception) {
+        "Unknown"
+    }
+}
+
+private data class CommandRequest(
+    val type: String,
+    val packageName: String? = null
+)
+
+private interface DeviceCommandApi {
+    @POST("api/devices/{deviceId}/command")
+    suspend fun sendCommand(
+        @Path("deviceId") deviceId: String,
+        @Body body: CommandRequest
+    ): Response<Map<String, String>>
+}
+
+private suspend fun sendDeviceCommand(
+    deviceId: String,
+    commandType: String,
+    packageName: String? = null
+): Boolean {
+    val commandApi = Retrofit.Builder()
+        .baseUrl("https://devora-production-dd2e.up.railway.app/")
+        .addConverterFactory(GsonConverterFactory.create())
+        .build()
+        .create(DeviceCommandApi::class.java)
+
+    val response = commandApi.sendCommand(
+        deviceId = deviceId,
+        body = CommandRequest(type = commandType, packageName = packageName)
+    )
+    return response.isSuccessful
 }
 
 @Composable

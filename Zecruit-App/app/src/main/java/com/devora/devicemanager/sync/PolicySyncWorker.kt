@@ -8,9 +8,9 @@ import android.util.Log
 import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
-import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
-import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.devora.devicemanager.AdminReceiver
@@ -19,11 +19,11 @@ import com.devora.devicemanager.network.RetrofitClient
 import java.util.concurrent.TimeUnit
 
 /**
- * Periodic worker (every 15 min — WorkManager minimum) that enforces MDM policies:
+ * Worker (reschedules itself every 5 minutes) that enforces MDM policies:
  *  1. App restrictions   — setPackagesSuspended() per restricted app
  *  2. Camera policy      — setCameraDisabled()
  *  3. Install/uninstall  — addUserRestriction(DISALLOW_INSTALL/UNINSTALL_APPS)
- *  4. Pending commands   — LOCK → lockNow(), WIPE → wipeData(), CAMERA_* → setCameraDisabled()
+ *  4. Pending commands   — LOCK, WIPE, CAMERA_*, FORCE_PASSWORD_RESET, CLEAR_APP_DATA, FORCE_SYNC
  */
 class PolicySyncWorker(
     context: Context,
@@ -39,19 +39,18 @@ class PolicySyncWorker(
                 .setRequiredNetworkType(NetworkType.CONNECTED)
                 .build()
 
-            val request = PeriodicWorkRequestBuilder<PolicySyncWorker>(
-                15, TimeUnit.MINUTES
-            )
+            val request = OneTimeWorkRequestBuilder<PolicySyncWorker>()
                 .setConstraints(constraints)
+                .setInitialDelay(5, TimeUnit.MINUTES)
                 .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
                 .build()
 
-            WorkManager.getInstance(context).enqueueUniquePeriodicWork(
+            WorkManager.getInstance(context).enqueueUniqueWork(
                 WORK_NAME,
-                ExistingPeriodicWorkPolicy.KEEP,
+                ExistingWorkPolicy.REPLACE,
                 request
             )
-            Log.d(TAG, "Policy sync worker scheduled")
+            Log.d(TAG, "Policy sync worker scheduled (5m)")
         }
     }
 
@@ -84,6 +83,8 @@ class PolicySyncWorker(
         } catch (e: Exception) {
             Log.w(TAG, "Command execution failed: ${e.message}")
         }
+
+        schedule(applicationContext)
 
         return Result.success()
     }
@@ -229,7 +230,8 @@ class PolicySyncWorker(
 
         val commands = response.body() ?: emptyList()
         for (cmd in commands) {
-            when (cmd.commandType) {
+            val commandType = cmd.commandType ?: ""
+            when (commandType) {
                 "LOCK" -> {
                     dpm.lockNow()
                     Log.d(TAG, "Executed LOCK command ${cmd.id}")
@@ -242,6 +244,18 @@ class PolicySyncWorker(
                     dpm.wipeData(0)
                     return // Device is wiping, no further commands
                 }
+                "FORCE_PASSWORD_RESET" -> {
+                    dpm.setPasswordQuality(admin, DevicePolicyManager.PASSWORD_QUALITY_ALPHANUMERIC)
+                    dpm.setPasswordMinimumLength(admin, 6)
+                    dpm.lockNow()
+                    Log.d(TAG, "Executed FORCE_PASSWORD_RESET command ${cmd.id}")
+                }
+                "FORCE_SYNC" -> {
+                    SyncWorker.schedule(applicationContext)
+                    DeviceInfoSyncWorker.schedule(applicationContext)
+                    LocationSyncWorker.schedule(applicationContext)
+                    Log.d(TAG, "Executed FORCE_SYNC command ${cmd.id}")
+                }
                 "CAMERA_DISABLE" -> {
                     dpm.setCameraDisabled(admin, true)
                     Log.d(TAG, "Executed CAMERA_DISABLE command ${cmd.id}")
@@ -249,6 +263,23 @@ class PolicySyncWorker(
                 "CAMERA_ENABLE" -> {
                     dpm.setCameraDisabled(admin, false)
                     Log.d(TAG, "Executed CAMERA_ENABLE command ${cmd.id}")
+                }
+                else -> {
+                    if (commandType.startsWith("CLEAR_APP_DATA:")) {
+                        val packageName = commandType.removePrefix("CLEAR_APP_DATA:").trim()
+                        if (packageName.isNotBlank() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                            dpm.clearApplicationUserData(
+                                admin,
+                                packageName,
+                                applicationContext.mainExecutor
+                            ) { _, success ->
+                                Log.d(TAG, "CLEAR_APP_DATA for $packageName success=$success")
+                            }
+                            Log.d(TAG, "Executed CLEAR_APP_DATA command ${cmd.id} for $packageName")
+                        } else {
+                            Log.w(TAG, "Cannot execute CLEAR_APP_DATA for command ${cmd.id}")
+                        }
+                    }
                 }
             }
             // Acknowledge command execution
