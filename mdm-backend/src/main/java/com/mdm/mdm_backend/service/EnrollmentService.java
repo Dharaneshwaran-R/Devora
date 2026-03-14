@@ -191,20 +191,24 @@ public class EnrollmentService {
     }
 
     public List<Device> getAllDevices() {
+        reconcileDeviceStatusesByHeartbeat();
         return deviceRepository.findAll();
     }
 
     public List<DeviceResponse> getAllDevicesAsResponse() {
+        reconcileDeviceStatusesByHeartbeat();
         return deviceRepository.findAll().stream()
                 .map(this::convertToDeviceResponse)
                 .collect(Collectors.toList());
     }
 
     public Optional<Device> getDevice(String deviceId) {
+        reconcileDeviceStatusesByHeartbeat();
         return deviceRepository.findByDeviceId(deviceId);
     }
 
     public Optional<DeviceResponse> getDeviceAsResponse(String deviceId) {
+        reconcileDeviceStatusesByHeartbeat();
         return deviceRepository.findByDeviceId(deviceId)
                 .map(this::convertToDeviceResponse);
     }
@@ -261,6 +265,9 @@ public class EnrollmentService {
     }
 
     public long countByStatus(String status) {
+        if ("ACTIVE".equalsIgnoreCase(status) || "OFFLINE".equalsIgnoreCase(status)) {
+            reconcileDeviceStatusesByHeartbeat();
+        }
         return deviceRepository.countByStatus(status);
     }
 
@@ -356,6 +363,11 @@ public class EnrollmentService {
     @Scheduled(fixedDelay = 60_000)
     @Transactional
     public void syncDeviceStatusFromHeartbeat() {
+        reconcileDeviceStatusesByHeartbeat();
+    }
+
+    @Transactional
+    private void reconcileDeviceStatusesByHeartbeat() {
         LocalDateTime cutoff = LocalDateTime.now().minusMinutes(DEVICE_OFFLINE_HEARTBEAT_WINDOW_MINUTES);
 
         deviceRepository.findAll().forEach(device -> {
