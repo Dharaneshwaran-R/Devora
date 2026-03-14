@@ -28,10 +28,10 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.Apps
 import androidx.compose.material.icons.outlined.Block
-import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -493,7 +493,7 @@ fun DeviceAppListScreen(
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Icon(
-                                        imageVector = if (isRestricted) Icons.Outlined.Check else Icons.Outlined.Block,
+                                        imageVector = if (isRestricted) Icons.Filled.Check else Icons.Outlined.Block,
                                         contentDescription = null,
                                         tint = if (isRestricted) Success else Danger,
                                         modifier = Modifier.size(12.dp)

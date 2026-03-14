@@ -53,6 +53,8 @@ public class EnrollmentService {
     private final MdmAlertRepository alertRepository;
     private final EmployeeRepository employeeRepository;
 
+    private static final long DEVICE_OFFLINE_HEARTBEAT_WINDOW_MINUTES = 20L;
+
     // ════════════════════════════════════════
     // ENROLLMENT TOKEN MANAGEMENT
     // ════════════════════════════════════════
@@ -347,6 +349,34 @@ public class EnrollmentService {
             if (now.isAfter(token.getExpiresAt())) {
                 token.setStatus("EXPIRED");
                 enrollmentTokenRepository.save(token);
+            }
+        });
+    }
+
+    @Scheduled(fixedDelay = 60_000)
+    @Transactional
+    public void syncDeviceStatusFromHeartbeat() {
+        LocalDateTime cutoff = LocalDateTime.now().minusMinutes(DEVICE_OFFLINE_HEARTBEAT_WINDOW_MINUTES);
+
+        deviceRepository.findAll().forEach(device -> {
+            String current = device.getStatus() == null ? "" : device.getStatus().trim().toUpperCase();
+
+            // Keep explicit sign-out devices offline until a fresh enroll flow sets ACTIVE again.
+            if ("OFFLINE".equals(current)) {
+                return;
+            }
+
+            LocalDateTime lastSeen = deviceInfoRepository
+                    .findFirstByDeviceIdOrderByCollectedAtDesc(device.getDeviceId())
+                    .map(DeviceInfo::getCollectedAt)
+                    .orElse(null);
+
+            boolean isRecentlySeen = lastSeen != null && !lastSeen.isBefore(cutoff);
+            String nextStatus = isRecentlySeen ? "ACTIVE" : "OFFLINE";
+
+            if (!nextStatus.equalsIgnoreCase(device.getStatus())) {
+                device.setStatus(nextStatus);
+                deviceRepository.save(device);
             }
         });
     }

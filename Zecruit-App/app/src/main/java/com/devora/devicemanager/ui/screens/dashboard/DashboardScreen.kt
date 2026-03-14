@@ -70,6 +70,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontWeight
@@ -80,6 +81,7 @@ import com.devora.devicemanager.ui.components.DevoraCard
 import com.devora.devicemanager.ui.components.SectionHeader
 import com.devora.devicemanager.network.DeviceActivityResponse
 import com.devora.devicemanager.data.remote.RemoteDataSource
+import com.devora.devicemanager.session.SessionManager
 import com.devora.devicemanager.ui.theme.BgBase
 import com.devora.devicemanager.ui.theme.BgElevated
 import com.devora.devicemanager.ui.theme.DMSans
@@ -160,11 +162,15 @@ fun DashboardScreen(
     isDark: Boolean,
     onThemeToggle: () -> Unit
 ) {
+    val context = LocalContext.current
     val dashboardViewModel: DashboardViewModel = viewModel()
     val dashboardUiState by dashboardViewModel.uiState.collectAsState()
 
     val bgColor = if (isDark) DarkBgBase else BgBase
     val textColor = if (isDark) DarkTextPrimary else TextPrimary
+    val adminName = remember { SessionManager.getAdminName(context).trim() }
+    val displayAdminName = adminName.ifBlank { "Admin" }
+    val adminInitial = displayAdminName.take(1).uppercase()
     val currentDate = remember {
         SimpleDateFormat("EEEE, MMMM d, yyyy", Locale.getDefault()).format(Date())
     }
@@ -292,7 +298,7 @@ fun DashboardScreen(
                         ) {
                             Column {
                                 Text(
-                                    text = "Good Morning, Admin",
+                                    text = "Hi $displayAdminName",
                                     fontFamily = PlusJakartaSans,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 20.sp,
@@ -320,7 +326,7 @@ fun DashboardScreen(
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
-                                    text = "A",
+                                    text = adminInitial,
                                     fontFamily = PlusJakartaSans,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 20.sp,

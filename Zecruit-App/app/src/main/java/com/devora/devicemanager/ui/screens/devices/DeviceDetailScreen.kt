@@ -1637,7 +1637,7 @@ private fun AppsTab(deviceId: String, isDark: Boolean, textColor: Color) {
                         .padding(horizontal = 8.dp, vertical = 4.dp)
                 ) {
                     Text(
-                        if (appRestricted) "✅ Allow" else "🚫 Restrict",
+                        if (appRestricted) "Allow" else "Restrict",
                         fontFamily = JetBrainsMono,
                         fontSize = 10.sp,
                         color = if (appRestricted) Success else Danger,
