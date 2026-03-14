@@ -378,10 +378,16 @@ public class EnrollmentService {
                 return;
             }
 
-            LocalDateTime lastSeen = deviceInfoRepository
-                    .findFirstByDeviceIdOrderByCollectedAtDesc(device.getDeviceId())
-                    .map(DeviceInfo::getCollectedAt)
-                    .orElse(null);
+            LocalDateTime lastSeen = device.getLastSeenAt();
+            if (lastSeen == null) {
+                lastSeen = deviceInfoRepository
+                        .findFirstByDeviceIdOrderByCollectedAtDesc(device.getDeviceId())
+                        .map(DeviceInfo::getCollectedAt)
+                        .orElse(null);
+                if (lastSeen != null) {
+                    device.setLastSeenAt(lastSeen);
+                }
+            }
 
             boolean isRecentlySeen = lastSeen != null && !lastSeen.isBefore(cutoff);
             String nextStatus = isRecentlySeen ? "ACTIVE" : "OFFLINE";

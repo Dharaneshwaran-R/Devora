@@ -31,4 +31,6 @@ public class Device {
     // Device Information
     private String deviceModel;
     private String manufacturer;
+
+    private LocalDateTime lastSeenAt;
 }

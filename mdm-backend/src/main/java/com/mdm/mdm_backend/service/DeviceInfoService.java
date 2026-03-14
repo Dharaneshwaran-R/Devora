@@ -40,6 +40,7 @@ public class DeviceInfoService {
         deviceRepository.findByDeviceId(request.getDeviceId()).ifPresent(device -> {
             if (request.getModel() != null) device.setDeviceModel(request.getModel());
             if (request.getManufacturer() != null) device.setManufacturer(request.getManufacturer());
+            device.setLastSeenAt(LocalDateTime.now());
 
             if (request.getEmployeeId() != null && !request.getEmployeeId().isBlank()) {
                 employeeRepository.findByEmployeeId(request.getEmployeeId()).ifPresent(employee -> {
