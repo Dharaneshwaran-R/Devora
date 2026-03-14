@@ -218,14 +218,12 @@ fun DashboardScreen(
     val totalDevices = dashboardStats?.totalDevices ?: 0
     val activeDevices = dashboardStats?.activeDevices ?: 0
     val inactiveDevices = (totalDevices - activeDevices).coerceAtLeast(0)
-    val violations = dashboardStats?.violations ?: inactiveDevices
     val onlineRatio = if (totalDevices > 0) activeDevices.toFloat() / totalDevices else 0f
     val onlinePercent = (onlineRatio * 100).toInt()
 
     val stats = listOf(
         Stat(totalDevices.toString(), "TOTAL DEVICES", Icons.Filled.Devices, PurpleCore),
         Stat(activeDevices.toString(), "ACTIVE NOW", Icons.Filled.CheckCircle, Success),
-        Stat(violations.toString(), "VIOLATIONS", Icons.Filled.Warning, Danger),
         Stat(inactiveDevices.toString(), "PENDING", Icons.Filled.Schedule, WarningColor)
     )
 

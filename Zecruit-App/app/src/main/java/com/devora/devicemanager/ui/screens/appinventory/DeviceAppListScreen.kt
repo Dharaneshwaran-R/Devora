@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.Apps
 import androidx.compose.material.icons.outlined.Block
+import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -41,6 +42,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -74,7 +76,9 @@ import com.devora.devicemanager.ui.theme.Success
 import com.devora.devicemanager.ui.theme.TextMuted
 import com.devora.devicemanager.ui.theme.TextPrimary
 import com.devora.devicemanager.ui.theme.Warning
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 fun DeviceAppListScreen(
@@ -93,14 +97,18 @@ fun DeviceAppListScreen(
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(deviceId) {
-        try {
-            val response = RemoteDataSource.getAppInventory(deviceId)
-            if (response.isSuccessful) {
-                allApps = response.body() ?: emptyList()
-            }
+        val inventoryResponse = try {
+            RemoteDataSource.getAppInventory(deviceId)
         } catch (e: Exception) {
             Log.e("DeviceAppList", "Failed to fetch app inventory: ${e.message}")
+            null
         }
+
+        if (inventoryResponse?.isSuccessful == true) {
+            allApps = inventoryResponse.body() ?: emptyList()
+        }
+        isLoading = false
+
         try {
             val rsp = RemoteDataSource.getRestrictedApps(deviceId)
             if (rsp.isSuccessful) {
@@ -111,7 +119,6 @@ fun DeviceAppListScreen(
         } catch (e: Exception) {
             Log.e("DeviceAppList", "Failed to fetch restricted apps: ${e.message}")
         }
-        isLoading = false
     }
 
     val userApps = allApps.filter { it.isSystemApp != true }
@@ -329,14 +336,7 @@ fun DeviceAppListScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             // App icon — real icon from base64 or fallback
-                            val iconBitmap = remember(app.iconBase64) {
-                                if (!app.iconBase64.isNullOrEmpty()) {
-                                    try {
-                                        val bytes = Base64.decode(app.iconBase64, Base64.DEFAULT)
-                                        BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                                    } catch (_: Exception) { null }
-                                } else null
-                            }
+                            val iconBitmap = rememberDecodedIconBitmap(app.iconBase64)
 
                             if (iconBitmap != null) {
                                 Box(
@@ -491,13 +491,22 @@ fun DeviceAppListScreen(
                                     }
                                     .padding(horizontal = 10.dp, vertical = 5.dp)
                             ) {
-                                Text(
-                                    if (isRestricted) "Allow" else "Restrict",
-                                    fontFamily = JetBrainsMono,
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (isRestricted) Success else Danger
-                                )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = if (isRestricted) Icons.Outlined.Check else Icons.Outlined.Block,
+                                        contentDescription = null,
+                                        tint = if (isRestricted) Success else Danger,
+                                        modifier = Modifier.size(12.dp)
+                                    )
+                                    Spacer(Modifier.width(4.dp))
+                                    Text(
+                                        if (isRestricted) "Allow" else "Restrict",
+                                        fontFamily = JetBrainsMono,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isRestricted) Success else Danger
+                                    )
+                                }
                             }
                         }
                         HorizontalDivider(
@@ -509,6 +518,23 @@ fun DeviceAppListScreen(
             }
         }
     }
+}
+
+@Composable
+private fun rememberDecodedIconBitmap(iconBase64: String?): android.graphics.Bitmap? {
+    val bitmapState = produceState<android.graphics.Bitmap?>(initialValue = null, key1 = iconBase64) {
+        value = if (iconBase64.isNullOrEmpty()) {
+            null
+        } else {
+            withContext(Dispatchers.Default) {
+                runCatching {
+                    val bytes = Base64.decode(iconBase64, Base64.DEFAULT)
+                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                }.getOrNull()
+            }
+        }
+    }
+    return bitmapState.value
 }
 
 private fun formatInstallSource(source: String?): String {

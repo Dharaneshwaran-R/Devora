@@ -74,12 +74,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -222,6 +224,7 @@ fun AdminGenerateEnrollmentScreen(
     var revokeTargetId by remember { mutableStateOf("") }
     var isRevoking by remember { mutableStateOf(false) }
     var showPayload by remember { mutableStateOf(false) }
+    var showAppQrDialog by remember { mutableStateOf(false) }
     var isLoadingSessions by remember { mutableStateOf(false) }
     var sessionsError by remember { mutableStateOf<String?>(null) }
     var sessionsRefreshTick by remember { mutableStateOf(0) }
@@ -426,6 +429,35 @@ fun AdminGenerateEnrollmentScreen(
                                     )
                                 }
                                 Spacer(Modifier.height(8.dp))
+                            }
+
+                            Spacer(Modifier.height(6.dp))
+
+                            Button(
+                                onClick = { showAppQrDialog = true },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(46.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = PurpleDim),
+                                elevation = ButtonDefaults.buttonElevation(0.dp)
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.QrCode2,
+                                        contentDescription = null,
+                                        tint = PurpleCore,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        text = "Open Application QR",
+                                        fontFamily = DMSans,
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 14.sp,
+                                        color = PurpleCore
+                                    )
+                                }
                             }
                         }
                     }
@@ -1059,6 +1091,107 @@ fun AdminGenerateEnrollmentScreen(
             dismissButton = {
                 TextButton(onClick = { showRevokeDialog = false }, enabled = !isRevoking) {
                     Text("Cancel", fontFamily = DMSans, fontSize = 14.sp, color = PurpleCore)
+                }
+            }
+        )
+    }
+
+    if (showAppQrDialog) {
+        val appQrResId = remember {
+            context.resources.getIdentifier("devora_qr", "drawable", context.packageName)
+                .takeIf { it != 0 }
+                ?: context.resources.getIdentifier("devora_app_qr", "drawable", context.packageName)
+                .takeIf { it != 0 }
+                ?: context.resources.getIdentifier("DEVORA_APP_QR", "drawable", context.packageName)
+        }
+
+        AlertDialog(
+            onDismissRequest = { showAppQrDialog = false },
+            containerColor = if (isDark) Color(0xFF171824) else Color.White,
+            shape = RoundedCornerShape(22.dp),
+            title = {
+                Text(
+                    text = "DEVORA Application QR",
+                    fontFamily = PlusJakartaSans,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp,
+                    color = textColor,
+                    modifier = Modifier.fillMaxWidth(),
+                    textAlign = TextAlign.Center
+                )
+            },
+            text = {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(
+                                Brush.linearGradient(
+                                    colors = listOf(
+                                        PurpleDim.copy(alpha = 0.65f),
+                                        Color(0xFFF4F6FF),
+                                        PurpleDim.copy(alpha = 0.35f)
+                                    )
+                                )
+                            )
+                            .border(1.5.dp, PurpleBorder, RoundedCornerShape(20.dp))
+                            .padding(16.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(268.dp)
+                                .clip(RoundedCornerShape(18.dp))
+                                .background(Color.White)
+                                .border(2.dp, PurpleCore.copy(alpha = 0.35f), RoundedCornerShape(18.dp))
+                                .padding(10.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (appQrResId != 0) {
+                                Image(
+                                    painter = painterResource(id = appQrResId),
+                                    contentDescription = "DEVORA application QR",
+                                    modifier = Modifier
+                                        .size(238.dp)
+                                        .clip(RoundedCornerShape(14.dp)),
+                                    contentScale = ContentScale.Crop
+                                )
+                            } else {
+                                Text(
+                                    text = "QR image not found in drawable",
+                                    fontFamily = DMSans,
+                                    fontSize = 12.sp,
+                                    color = TextMuted,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(12.dp))
+
+                    Text(
+                        text = "Scan this QR to open the DEVORA application link.",
+                        fontFamily = DMSans,
+                        fontSize = 12.sp,
+                        color = TextMuted,
+                        textAlign = TextAlign.Center
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = { showAppQrDialog = false },
+                    colors = ButtonDefaults.buttonColors(containerColor = PurpleCore),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text(
+                        text = "Close",
+                        fontFamily = DMSans,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color.White
+                    )
                 }
             }
         )

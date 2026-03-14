@@ -39,12 +39,14 @@ import androidx.compose.material.icons.automirrored.outlined.Logout
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.SupportAgent
 import androidx.compose.material.icons.outlined.Block
 import androidx.compose.material.icons.outlined.CameraAlt
 import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.LocationOn
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.PhoneAndroid
@@ -117,7 +119,7 @@ import java.util.Locale
 
 // Internal activity data class for unified UI
 private data class UIActivity(
-    val icon: String,
+    val icon: ImageVector,
     val description: String,
     val timestamp: Long,
     val createdAtStr: String? = null
@@ -200,13 +202,13 @@ fun EmployeeDashboardScreen(
             if (response.isSuccessful) {
                 response.body()?.forEach { res ->
                     val icon = when (res.activityType) {
-                        "ENROLLED" -> "✅"
-                        "APP_RESTRICTED" -> "🚫"
-                        "DEVICE_LOCKED" -> "🔒"
-                        "CAMERA_DISABLED" -> "📷"
-                        "APP_INSTALLED" -> "📲"
-                        "LOCATION_UPDATED" -> "📍"
-                        else -> "ℹ️"
+                        "ENROLLED" -> Icons.Outlined.Shield
+                        "APP_RESTRICTED" -> Icons.Outlined.Block
+                        "DEVICE_LOCKED" -> Icons.Outlined.Lock
+                        "CAMERA_DISABLED" -> Icons.Outlined.CameraAlt
+                        "APP_INSTALLED" -> Icons.Outlined.PhoneAndroid
+                        "LOCATION_UPDATED" -> Icons.Outlined.LocationOn
+                        else -> Icons.Filled.Info
                     }
                     val parsedTime = parseISO(res.createdAt)
                     if (parsedTime != null) {
@@ -234,12 +236,12 @@ fun EmployeeDashboardScreen(
                 (appInfo.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) == 0
             }.forEach { pkg ->
                 val appName = pkg.applicationInfo?.loadLabel(pm)?.toString() ?: "Unknown App"
-                list.add(UIActivity("📲", "$appName installed", pkg.firstInstallTime))
+                list.add(UIActivity(Icons.Outlined.PhoneAndroid, "$appName installed", pkg.firstInstallTime))
             }
 
             // Enrollment activity if just enrolled
             if (enrolledAt > (System.currentTimeMillis() - 3600000)) {
-                list.add(UIActivity("✅", "Device enrolled in DEVORA MDM", enrolledAt))
+                list.add(UIActivity(Icons.Outlined.Shield, "Device enrolled in DEVORA MDM", enrolledAt))
             }
 
         } catch (e: Exception) { }
@@ -617,7 +619,7 @@ fun EmployeeDashboardScreen(
                     ),
                     Triple("Android", deviceInfo.osVersion, textColor),
                     Triple("SDK Level", deviceInfo.sdkVersion.toString(), textColor),
-                    Triple("Status", "Enrolled ✓", Success),
+                    Triple("Status", "Enrolled", Success),
                     Triple("Policy", "Enterprise Standard", PurpleCore),
                     Triple("Server", "Connected", Success)
                 )
@@ -829,11 +831,21 @@ fun EmployeeDashboardScreen(
                                     .padding(vertical = 12.dp),
                                 verticalAlignment = Alignment.Top
                             ) {
-                                Text(
-                                    text = activity.icon,
-                                    fontSize = 18.sp,
-                                    modifier = Modifier.padding(top = 2.dp)
-                                )
+                                Box(
+                                    modifier = Modifier
+                                        .padding(top = 2.dp)
+                                        .size(28.dp)
+                                        .clip(CircleShape)
+                                        .background(PurpleDim),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = activity.icon,
+                                        contentDescription = null,
+                                        tint = PurpleCore,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
                                 Spacer(Modifier.width(12.dp))
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
