@@ -35,22 +35,46 @@ class PolicySyncWorker(
         private const val WORK_NAME = "devora_policy_sync"
 
         fun schedule(context: Context) {
+            enqueue(
+                context,
+                initialDelaySeconds = 5,
+                workPolicy = ExistingWorkPolicy.APPEND
+            )
+        }
+
+        fun scheduleNow(context: Context) {
+            enqueue(
+                context,
+                initialDelaySeconds = 0,
+                workPolicy = ExistingWorkPolicy.REPLACE
+            )
+        }
+
+        private fun enqueue(
+            context: Context,
+            initialDelaySeconds: Long,
+            workPolicy: ExistingWorkPolicy
+        ) {
             val constraints = Constraints.Builder()
                 .setRequiredNetworkType(NetworkType.CONNECTED)
                 .build()
 
-            val request = OneTimeWorkRequestBuilder<PolicySyncWorker>()
+            val requestBuilder = OneTimeWorkRequestBuilder<PolicySyncWorker>()
                 .setConstraints(constraints)
-                .setInitialDelay(5, TimeUnit.SECONDS)
                 .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
-                .build()
+
+            if (initialDelaySeconds > 0) {
+                requestBuilder.setInitialDelay(initialDelaySeconds, TimeUnit.SECONDS)
+            }
+
+            val request = requestBuilder.build()
 
             WorkManager.getInstance(context).enqueueUniqueWork(
                 WORK_NAME,
-                ExistingWorkPolicy.REPLACE,
+                workPolicy,
                 request
             )
-            Log.d(TAG, "Policy sync worker scheduled (5s)")
+            Log.d(TAG, "Policy sync worker scheduled (${initialDelaySeconds}s, policy=$workPolicy)")
         }
     }
 
@@ -59,27 +83,35 @@ class PolicySyncWorker(
         val deviceId = prefs.getString("device_id", null) ?: return Result.success()
 
         val dpm = applicationContext.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
-        if (!dpm.isDeviceOwnerApp(applicationContext.packageName)) {
-            Log.d(TAG, "Not Device Owner — skipping policy sync")
+        val admin = AdminReceiver.getComponentName(applicationContext)
+        val isDeviceOwner = dpm.isDeviceOwnerApp(applicationContext.packageName)
+        val isAdminActive = dpm.isAdminActive(admin)
+
+        if (!isAdminActive) {
+            Log.w(TAG, "Admin receiver is not active — skipping policy + command execution")
             return Result.success()
         }
 
-        val admin = AdminReceiver.getComponentName(applicationContext)
+        if (!isDeviceOwner) {
+            Log.d(TAG, "Not Device Owner — skipping owner-only policy enforcement")
+        }
 
-        try {
-            enforceAppRestrictions(deviceId, dpm, admin)
-        } catch (e: Exception) {
-            Log.w(TAG, "App restriction enforcement failed: ${e.message}")
+        if (isDeviceOwner) {
+            try {
+                enforceAppRestrictions(deviceId, dpm, admin)
+            } catch (e: Exception) {
+                Log.w(TAG, "App restriction enforcement failed: ${e.message}")
+            }
+
+            try {
+                enforcePolicies(deviceId, dpm, admin)
+            } catch (e: Exception) {
+                Log.w(TAG, "Policy enforcement failed: ${e.message}")
+            }
         }
 
         try {
-            enforcePolicies(deviceId, dpm, admin)
-        } catch (e: Exception) {
-            Log.w(TAG, "Policy enforcement failed: ${e.message}")
-        }
-
-        try {
-            executePendingCommands(deviceId, dpm, admin)
+            executePendingCommands(deviceId, dpm, admin, isDeviceOwner)
         } catch (e: Exception) {
             Log.w(TAG, "Command execution failed: ${e.message}")
         }
@@ -218,13 +250,9 @@ class PolicySyncWorker(
     private suspend fun executePendingCommands(
         deviceId: String,
         dpm: DevicePolicyManager,
-        admin: android.content.ComponentName
+        admin: android.content.ComponentName,
+        isDeviceOwner: Boolean
     ) {
-        if (!dpm.isDeviceOwnerApp(applicationContext.packageName)) {
-            Log.w(TAG, "Not device owner, skipping command execution")
-            return
-        }
-
         val response = RetrofitClient.api.getPendingCommands(deviceId)
         if (!response.isSuccessful) return
 
@@ -237,6 +265,10 @@ class PolicySyncWorker(
                     Log.d(TAG, "Executed LOCK command ${cmd.id}")
                 }
                 "WIPE" -> {
+                    if (!isDeviceOwner) {
+                        Log.w(TAG, "Skipping WIPE command ${cmd.id}: requires Device Owner")
+                        continue
+                    }
                     // Acknowledge before wiping since device resets
                     try {
                         RetrofitClient.api.ackCommand(deviceId, cmd.id)
@@ -270,6 +302,10 @@ class PolicySyncWorker(
                 }
                 else -> {
                     if (commandType.startsWith("CLEAR_APP_DATA:")) {
+                        if (!isDeviceOwner) {
+                            Log.w(TAG, "Skipping CLEAR_APP_DATA command ${cmd.id}: requires Device Owner")
+                            continue
+                        }
                         val packageName = commandType.removePrefix("CLEAR_APP_DATA:").trim()
                         if (packageName.isNotBlank() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                             dpm.clearApplicationUserData(
