@@ -9,11 +9,11 @@ import com.mdm.mdm_backend.model.entity.Employee;
 import com.mdm.mdm_backend.model.entity.MdmAlert;
 import com.mdm.mdm_backend.model.entity.EnrollmentToken;
 import com.mdm.mdm_backend.repository.AppInventoryRepository;
+import com.mdm.mdm_backend.repository.AccurateDeviceLocationRepository;
 import com.mdm.mdm_backend.repository.AdminNotificationRepository;
 import com.mdm.mdm_backend.repository.DeviceActivityRepository;
 import com.mdm.mdm_backend.repository.DeviceAppRestrictionRepository;
 import com.mdm.mdm_backend.repository.DeviceCommandRepository;
-import com.mdm.mdm_backend.repository.DeviceLocationRepository;
 import com.mdm.mdm_backend.repository.DevicePolicyRepository;
 import com.mdm.mdm_backend.repository.MdmAlertRepository;
 import com.mdm.mdm_backend.repository.RestrictedAppRepository;
@@ -48,7 +48,7 @@ public class EnrollmentService {
     private final DeviceAppRestrictionRepository appRestrictionRepository;
     private final DevicePolicyRepository policyRepository;
     private final DeviceCommandRepository commandRepository;
-    private final DeviceLocationRepository locationRepository;
+    private final AccurateDeviceLocationRepository accurateLocationRepository;
     private final DeviceActivityRepository activityRepository;
     private final MdmAlertRepository alertRepository;
     private final EmployeeRepository employeeRepository;
@@ -302,7 +302,7 @@ public class EnrollmentService {
         policyRepository.deleteByDeviceId(deviceId);
 
         // 7) Location
-        locationRepository.deleteByDeviceId(deviceId);
+        accurateLocationRepository.deleteByDeviceId(deviceId);
 
         // 8) Commands
         commandRepository.deleteByDeviceId(deviceId);

@@ -25,4 +25,7 @@ public interface AccurateDeviceLocationRepository extends JpaRepository<Accurate
         nativeQuery = true
     )
     void deleteOldLocations(@Param("deviceId") String deviceId);
+
+    @Transactional
+    void deleteByDeviceId(String deviceId);
 }
