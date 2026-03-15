@@ -2114,28 +2114,46 @@ private fun ActionsTab(
                 cameraDisabled = policy?.cameraDisabled ?: cameraDisabled
                 trackingEnabled = policy?.locationTrackingEnabled ?: false
                 policyLoaded = true
+            } else {
+                Log.w("ActionsTab", "Policy fetch failed: ${policyResponse.code()}")
             }
-        } catch (_: Exception) { }
+        } catch (e: Exception) {
+            Log.e("ActionsTab", "Error loading policies: ${e.message}", e)
+        }
 
         try {
+            Log.d("ActionsTab", "Fetching location for device: $deviceId")
             val locationResponse = RetrofitClient.api.getDeviceLocation(deviceId)
             if (locationResponse.isSuccessful) {
                 val body = locationResponse.body()
+                Log.d("ActionsTab", "Location response: $body")
                 location = body
                 val lat = body?.latitude
                 val lng = body?.longitude
                 if (lat != null && lng != null) {
+                    Log.d("ActionsTab", "Location received: $lat, $lng")
                     locationAddress = fetchAddress(lat, lng)
+                } else {
+                    Log.d("ActionsTab", "Location coordinates are null")
                 }
+            } else {
+                Log.w("ActionsTab", "Location fetch failed: ${locationResponse.code()}")
             }
-        } catch (_: Exception) { }
+        } catch (e: Exception) {
+            Log.e("ActionsTab", "Error loading location: ${e.message}", e)
+        }
 
         try {
             val historyResponse = RetrofitClient.api.getLocationHistory(deviceId, 5)
             if (historyResponse.isSuccessful) {
                 locationHistory = historyResponse.body() ?: emptyList()
+                Log.d("ActionsTab", "Location history loaded: ${locationHistory.size} points")
+            } else {
+                Log.w("ActionsTab", "Location history fetch failed: ${historyResponse.code()}")
             }
-        } catch (_: Exception) { }
+        } catch (e: Exception) {
+            Log.e("ActionsTab", "Error loading location history: ${e.message}", e)
+        }
     }
 
     // Load initial state
@@ -2390,7 +2408,19 @@ private fun ActionsTab(
         val lat = location?.latitude
         val lng = location?.longitude
 
-        if (lat != null && lng != null) {
+        if (isRequestingLocation) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 32.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                CircularProgressIndicator(color = PurpleCore, modifier = Modifier.size(32.dp))
+                Spacer(Modifier.height(12.dp))
+                Text("Requesting device location...", color = TextMuted, fontSize = 12.sp)
+            }
+        } else if (lat != null && lng != null) {
             DeviceLocationMap(
                 latitude = lat,
                 longitude = lng,
@@ -2417,6 +2447,8 @@ private fun ActionsTab(
                         .fillMaxWidth()
                         .padding(12.dp)
                 ) {
+                    val loc = location  // Local reference to avoid smart cast issues
+                    
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
                             Icons.Filled.Place,
@@ -2443,18 +2475,144 @@ private fun ActionsTab(
                     )
 
                     Spacer(Modifier.height(4.dp))
+
+                    // Accuracy Quality Indicator
+                    val accuracy = loc?.accuracy ?: 0f
+                    val (accuracyColor, accuracyLabel) = when {
+                        accuracy < 10f -> Success to "Excellent"
+                        accuracy < 25f -> PurpleCore to "Very Good"
+                        accuracy < 50f -> Warning to "Good"
+                        accuracy < 100f -> Warning to "Fair"
+                        else -> Danger to "Poor"
+                    }
+
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = accuracyColor.copy(alpha = 0.10f),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, accuracyColor.copy(alpha = 0.3f))
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "Accuracy: ±${accuracy.toInt()}m - $accuracyLabel",
+                                fontFamily = DMSans,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = accuracyColor
+                            )
+                        }
+                    }
+
+                    Spacer(Modifier.height(8.dp))
+
+                    // Additional Metrics Grid
+                    Column {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            // Altitude
+                            if (loc?.altitude != null) {
+                                Surface(
+                                    modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = if (isDark) DarkBgElevated else Color(0xFFF5F5F5),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, PurpleCore.copy(alpha = 0.15f))
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(8.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        Text(
+                                            "Altitude",
+                                            fontFamily = DMSans,
+                                            fontSize = 10.sp,
+                                            color = TextMuted
+                                        )
+                                        Text(
+                                            "${"%.0f".format(loc.altitude!!)}m",
+                                            fontFamily = JetBrainsMono,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = textColor
+                                        )
+                                    }
+                                }
+                            }
+
+                            // Speed
+                            if (loc?.speed != null && loc.speed!! > 0f) {
+                                Surface(
+                                    modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = if (isDark) DarkBgElevated else Color(0xFFF5F5F5),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, PurpleCore.copy(alpha = 0.15f))
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(8.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        Text(
+                                            "Speed",
+                                            fontFamily = DMSans,
+                                            fontSize = 10.sp,
+                                            color = TextMuted
+                                        )
+                                        Text(
+                                            "${"%.1f".format(loc.speed!! * 3.6f)} km/h",
+                                            fontFamily = JetBrainsMono,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = textColor
+                                        )
+                                    }
+                                }
+                            }
+
+                            // Bearing
+                            if (loc?.bearing != null && loc.bearing!! > 0f) {
+                                Surface(
+                                    modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = if (isDark) DarkBgElevated else Color(0xFFF5F5F5),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, PurpleCore.copy(alpha = 0.15f))
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(8.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        Text(
+                                            "Bearing",
+                                            fontFamily = DMSans,
+                                            fontSize = 10.sp,
+                                            color = TextMuted
+                                        )
+                                        Text(
+                                            "${"%.0f".format(loc.bearing!!)}°",
+                                            fontFamily = JetBrainsMono,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = textColor
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(8.dp))
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text(
-                            "Accuracy: ±${(location?.accuracy ?: 0f).toInt()}m",
-                            fontFamily = DMSans,
-                            fontSize = 11.sp,
-                            color = TextMuted
-                        )
-                        Text(
-                            "Updated: ${getTimeAgo(location?.recordedAt.orEmpty(), currentTime)}",
+                            "Updated: ${getTimeAgo(loc?.recordedAt.orEmpty(), currentTime)}",
                             fontFamily = DMSans,
                             fontSize = 11.sp,
                             color = TextMuted
@@ -2496,8 +2654,45 @@ private fun ActionsTab(
                     )
                     Spacer(Modifier.height(8.dp))
                     Text("No location data available", color = TextMuted, fontSize = 13.sp)
-                    Text("Enable tracking to start", color = TextMuted.copy(alpha = 0.7f), fontSize = 11.sp)
+                    Text("Enable tracking or request location", color = TextMuted.copy(alpha = 0.7f), fontSize = 11.sp)
                 }
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            OutlinedButton(
+                onClick = {
+                    coroutineScope.launch {
+                        isRequestingLocation = true
+                        try {
+                            val response = RetrofitClient.api.createDeviceCommand(
+                                deviceId,
+                                CommandRequest("REQUEST_LOCATION", null)
+                            )
+                            if (response.isSuccessful) {
+                                onShowMessage("Location request sent to device. Please wait...")
+                                delay(3000L)
+                                loadLocationData()
+                            } else {
+                                onShowMessage("Failed to request location")
+                            }
+                        } catch (e: Exception) {
+                            Log.e("ActionsTab", "Error requesting location: ${e.message}")
+                            onShowMessage("Error requesting location: ${e.message}")
+                        } finally {
+                            isRequestingLocation = false
+                        }
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(10.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, PurpleCore),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = PurpleCore),
+                enabled = !isRequestingLocation
+            ) {
+                Icon(Icons.Filled.MyLocation, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(if (isRequestingLocation) "Requesting..." else "Request Location Now")
             }
         }
 

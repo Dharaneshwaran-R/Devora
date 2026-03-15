@@ -168,6 +168,9 @@ data class DeviceLocationResponse(
     @SerializedName("latitude") val latitude: Double?,
     @SerializedName("longitude") val longitude: Double?,
     @SerializedName("accuracy") val accuracy: Float?,
+    @SerializedName("altitude") val altitude: Double? = null,
+    @SerializedName("bearing") val bearing: Float? = null,
+    @SerializedName("speed") val speed: Float? = null,
     @SerializedName("address") val address: String?,
     @SerializedName("recordedAt") val recordedAt: String?
 )
@@ -185,6 +188,9 @@ data class LocationResponse(
     @SerializedName("latitude") val latitude: Double,
     @SerializedName("longitude") val longitude: Double,
     @SerializedName("accuracy") val accuracy: Float,
+    @SerializedName("altitude") val altitude: Double? = null,
+    @SerializedName("bearing") val bearing: Float? = null,
+    @SerializedName("speed") val speed: Float? = null,
     @SerializedName("address") val address: String?,
     @SerializedName("recordedAt") val recordedAt: String
 )
@@ -192,7 +198,10 @@ data class LocationResponse(
 data class LocationReportRequest(
     @SerializedName("latitude") val latitude: Double,
     @SerializedName("longitude") val longitude: Double,
-    @SerializedName("accuracy") val accuracy: Float
+    @SerializedName("accuracy") val accuracy: Float,
+    @SerializedName("altitude") val altitude: Double? = null,
+    @SerializedName("bearing") val bearing: Float? = null,
+    @SerializedName("speed") val speed: Float? = null
 )
 
 data class DeviceCommandResponse(
@@ -476,24 +485,24 @@ interface EnrollmentApiService {
 
     // ── Location ──
 
-    @POST("api/devices/{deviceId}/location")
+    @POST("api/devices/{deviceId}/accurate-location")
     suspend fun updateLocation(
         @Path("deviceId") deviceId: String,
         @Body request: LocationRequest
     ): Response<Unit>
 
-    @POST("api/devices/{deviceId}/location")
+    @POST("api/devices/{deviceId}/accurate-location")
     suspend fun reportLocation(
         @Path("deviceId") deviceId: String,
         @Body request: LocationReportRequest
     ): Response<Map<String, String>>
 
-    @GET("api/devices/{deviceId}/location")
+    @GET("api/devices/{deviceId}/accurate-location")
     suspend fun getDeviceLocation(
         @Path("deviceId") deviceId: String
     ): Response<DeviceLocationResponse>
 
-    @GET("api/devices/{deviceId}/location/history")
+    @GET("api/devices/{deviceId}/accurate-location/history")
     suspend fun getLocationHistory(
         @Path("deviceId") deviceId: String,
         @Query("limit") limit: Int = 5

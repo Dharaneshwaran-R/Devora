@@ -2,17 +2,17 @@
 package com.mdm.mdm_backend.controller;
 
 import com.mdm.mdm_backend.model.dto.DeviceResponse;
+import com.mdm.mdm_backend.model.entity.AccurateDeviceLocation;
 import com.mdm.mdm_backend.model.entity.Device;
 import com.mdm.mdm_backend.model.entity.DeviceActivity;
 import com.mdm.mdm_backend.model.entity.DeviceAppRestriction;
 import com.mdm.mdm_backend.model.entity.DeviceCommand;
-import com.mdm.mdm_backend.model.entity.DeviceLocation;
 import com.mdm.mdm_backend.model.entity.DevicePolicy;
 import com.mdm.mdm_backend.model.entity.MdmAlert;
+import com.mdm.mdm_backend.repository.AccurateDeviceLocationRepository;
 import com.mdm.mdm_backend.repository.DeviceActivityRepository;
 import com.mdm.mdm_backend.repository.DeviceAppRestrictionRepository;
 import com.mdm.mdm_backend.repository.DeviceCommandRepository;
-import com.mdm.mdm_backend.repository.DeviceLocationRepository;
 import com.mdm.mdm_backend.repository.DevicePolicyRepository;
 import com.mdm.mdm_backend.repository.DeviceRepository;
 import com.mdm.mdm_backend.repository.MdmAlertRepository;
@@ -39,7 +39,7 @@ public class DeviceController {
     private final DeviceAppRestrictionRepository appRestrictionRepo;
     private final DevicePolicyRepository policyRepo;
     private final DeviceCommandRepository commandRepo;
-    private final DeviceLocationRepository locationRepo;
+        private final AccurateDeviceLocationRepository accurateLocationRepo;
     private final DeviceActivityRepository activityRepo;
     private final MdmAlertRepository alertRepo;
     private final DeviceRepository deviceRepo;
@@ -366,6 +366,12 @@ public class DeviceController {
                 ? Double.parseDouble(body.get("longitude").toString()) : null;
         Float accuracy = body.get("accuracy") != null
                 ? Float.parseFloat(body.get("accuracy").toString()) : null;
+        Double altitude = body.get("altitude") != null
+                ? Double.parseDouble(body.get("altitude").toString()) : null;
+        Float bearing = body.get("bearing") != null
+                ? Float.parseFloat(body.get("bearing").toString()) : null;
+        Float speed = body.get("speed") != null
+                ? Float.parseFloat(body.get("speed").toString()) : null;
         String address = (String) body.getOrDefault("address", "");
 
         if (lat == null || lng == null)
@@ -374,13 +380,14 @@ public class DeviceController {
         String employeeName = deviceRepo.findByDeviceId(deviceId)
                 .map(Device::getEmployeeName).orElse("Unknown");
 
-        locationRepo.save(DeviceLocation.builder()
+        accurateLocationRepo.save(AccurateDeviceLocation.builder()
                 .deviceId(deviceId).latitude(lat).longitude(lng)
-                .accuracy(accuracy).address(address)
+                .accuracy(accuracy).altitude(altitude).bearing(bearing).speed(speed)
+                .address(address)
                 .recordedAt(LocalDateTime.now()).build());
 
         // Keep only latest 50 points per device.
-        locationRepo.deleteOldLocations(deviceId);
+        accurateLocationRepo.deleteOldLocations(deviceId);
 
         activityRepo.save(DeviceActivity.builder()
                 .deviceId(deviceId)
@@ -396,18 +403,18 @@ public class DeviceController {
 
     @GetMapping("/devices/{deviceId}/location")
     public ResponseEntity<?> getLocation(@PathVariable String deviceId) {
-        return locationRepo.findTopByDeviceIdOrderByRecordedAtDesc(deviceId)
+                return accurateLocationRepo.findTopByDeviceIdOrderByRecordedAtDesc(deviceId)
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.notFound().build());
     }
 
     @GetMapping("/devices/{deviceId}/location/history")
-    public ResponseEntity<List<DeviceLocation>> getLocationHistory(
+        public ResponseEntity<List<AccurateDeviceLocation>> getLocationHistory(
             @PathVariable String deviceId,
             @RequestParam(defaultValue = "5") int limit
     ) {
         int safeLimit = Math.max(1, Math.min(limit, 10));
-        List<DeviceLocation> locations = locationRepo
+                List<AccurateDeviceLocation> locations = accurateLocationRepo
                 .findTop10ByDeviceIdOrderByRecordedAtDesc(deviceId)
                 .stream()
                 .limit(safeLimit)
@@ -415,6 +422,25 @@ public class DeviceController {
 
         return ResponseEntity.ok(locations);
     }
+
+        @PostMapping("/devices/{deviceId}/accurate-location")
+        public ResponseEntity<?> reportAccurateLocation(@PathVariable String deviceId,
+                                                                                                        @RequestBody Map<String, Object> body) {
+                return reportLocation(deviceId, body);
+        }
+
+        @GetMapping("/devices/{deviceId}/accurate-location")
+        public ResponseEntity<?> getAccurateLocation(@PathVariable String deviceId) {
+                return getLocation(deviceId);
+        }
+
+        @GetMapping("/devices/{deviceId}/accurate-location/history")
+        public ResponseEntity<List<AccurateDeviceLocation>> getAccurateLocationHistory(
+                        @PathVariable String deviceId,
+                        @RequestParam(defaultValue = "5") int limit
+        ) {
+                return getLocationHistory(deviceId, limit);
+        }
 
     @PostMapping("/devices/{deviceId}/sign-out")
     public ResponseEntity<?> signOutDevice(@PathVariable String deviceId) {
