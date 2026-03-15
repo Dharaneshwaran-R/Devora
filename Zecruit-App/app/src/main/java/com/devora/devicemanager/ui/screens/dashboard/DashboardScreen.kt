@@ -230,7 +230,7 @@ fun DashboardScreen(
     val stats = listOf(
         Stat(totalDevices.toString(), "TOTAL DEVICES", Icons.Filled.Devices, PurpleCore),
         Stat(activeDevices.toString(), "ACTIVE NOW", Icons.Filled.CheckCircle, Success),
-        Stat(inactiveDevices.toString(), "PENDING", Icons.Filled.Schedule, WarningColor)
+        Stat(inactiveDevices.toString(), "OFFLINE", Icons.Filled.Schedule, WarningColor)
     )
 
     Scaffold(

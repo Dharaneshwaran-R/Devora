@@ -32,23 +32,26 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowForward
 import androidx.compose.material.icons.automirrored.outlined.Logout
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.PhoneAndroid
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SupportAgent
 import androidx.compose.material.icons.outlined.Block
+import androidx.compose.material.icons.outlined.Apps
 import androidx.compose.material.icons.outlined.CameraAlt
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.LocationOn
 import androidx.compose.material.icons.outlined.Lock
-import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.PhoneAndroid
 import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material.icons.outlined.SupportAgent
@@ -74,7 +77,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -84,12 +90,12 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.devora.devicemanager.AdminReceiver
 import com.devora.devicemanager.collector.DeviceInfoCollector
-import com.devora.devicemanager.network.DevicePolicyResponse
+import com.devora.devicemanager.network.AppInventoryItem
 import com.devora.devicemanager.session.SessionManager
 import com.devora.devicemanager.ui.components.DevoraCard
 import com.devora.devicemanager.ui.components.SectionHeader
-import com.devora.devicemanager.ui.components.StatusBadge
 import com.devora.devicemanager.ui.theme.BgBase
 import com.devora.devicemanager.ui.theme.BgSurface
 import com.devora.devicemanager.ui.theme.DMSans
@@ -105,7 +111,6 @@ import com.devora.devicemanager.ui.theme.PurpleDim
 import com.devora.devicemanager.ui.theme.Success
 import com.devora.devicemanager.ui.theme.TextMuted
 import com.devora.devicemanager.ui.theme.TextPrimary
-import com.devora.devicemanager.ui.theme.Warning
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.Instant
@@ -148,7 +153,12 @@ fun EmployeeDashboardScreen(
 
     // FIX 3: Activities state
     var activities by remember { mutableStateOf<List<UIActivity>>(emptyList()) }
-    var policyState by remember { mutableStateOf<DevicePolicyResponse?>(null) }
+    var isAppInventoryLoading by remember { mutableStateOf(true) }
+    var appInventory by remember { mutableStateOf<List<AppInventoryItem>>(emptyList()) }
+    var restrictedPackages by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var appSearchQuery by remember { mutableStateOf("") }
+    var appFilter by remember { mutableStateOf("ALL") }
+    var lockParentScrollForApps by remember { mutableStateOf(false) }
 
     fun getTimeAgo(timestamp: Long): String {
         val diff = (System.currentTimeMillis() - timestamp).coerceAtLeast(0L)
@@ -251,15 +261,29 @@ fun EmployeeDashboardScreen(
             .take(10)
     }
 
-    suspend fun loadPolicyState() {
+    suspend fun loadAppInventory() {
+        isAppInventoryLoading = true
         try {
-            val response = RemoteDataSource.getDevicePolicies(deviceInfo.deviceId)
-            if (response.isSuccessful) {
-                policyState = response.body()
+            val inventoryResponse = RemoteDataSource.getAppInventory(deviceInfo.deviceId)
+            if (inventoryResponse.isSuccessful) {
+                appInventory = inventoryResponse.body() ?: emptyList()
             }
         } catch (_: Exception) {
-            // Keep existing state on transient failures; next refresh will retry.
+            // Keep the last successful app inventory; retry on next refresh.
         }
+
+        try {
+            val restrictedResponse = RemoteDataSource.getRestrictedApps(deviceInfo.deviceId)
+            if (restrictedResponse.isSuccessful) {
+                restrictedPackages = (restrictedResponse.body() ?: emptyList())
+                    .filter { it.restricted }
+                    .map { it.packageName }
+                    .toSet()
+            }
+        } catch (_: Exception) {
+            // Keep the last known restriction state on transient failures.
+        }
+        isAppInventoryLoading = false
     }
 
     suspend fun verifyDeviceStillActive() {
@@ -281,10 +305,10 @@ fun EmployeeDashboardScreen(
 
     LaunchedEffect(Unit) {
         loadActivities()
-        loadPolicyState()
+        loadAppInventory()
         while (true) {
             verifyDeviceStillActive()
-            loadPolicyState()
+            loadAppInventory()
             delay(30_000)
         }
     }
@@ -293,7 +317,7 @@ fun EmployeeDashboardScreen(
         if (checkTick > 0) {
             verifyDeviceStillActive()
             loadActivities()
-            loadPolicyState()
+            loadAppInventory()
         }
     }
 
@@ -309,13 +333,20 @@ fun EmployeeDashboardScreen(
 
     val bgColor = if (isDark) DarkBgBase else BgBase
     val textColor = if (isDark) DarkTextPrimary else TextPrimary
-    val isPolicySynced = policyState != null
-    val appInstallRestricted = (policyState?.installBlocked == true) || (policyState?.uninstallBlocked == true)
-    val activePolicyCount = listOf(
-        policyState?.screenLockRequired == true,
-        appInstallRestricted,
-        policyState?.cameraDisabled == true
-    ).count { it }
+    val isDeviceOwnerSet = remember(context) {
+        runCatching { AdminReceiver.isDeviceOwner(context) }.getOrDefault(false)
+    }
+    val userApps = appInventory.filter { it.isSystemApp != true }
+    val systemApps = appInventory.filter { it.isSystemApp == true }
+    val filteredApps = when (appFilter) {
+        "USER" -> userApps
+        "SYSTEM" -> systemApps
+        else -> appInventory
+    }.filter {
+        appSearchQuery.isBlank() ||
+            it.appName.contains(appSearchQuery, ignoreCase = true) ||
+            it.packageName.contains(appSearchQuery, ignoreCase = true)
+    }
 
     Scaffold(
         containerColor = bgColor
@@ -324,7 +355,7 @@ fun EmployeeDashboardScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
-                .verticalScroll(rememberScrollState())
+                .verticalScroll(rememberScrollState(), enabled = !lockParentScrollForApps)
                 .padding(16.dp)
         ) {
             // ══════════════════════════════════════
@@ -344,25 +375,13 @@ fun EmployeeDashboardScreen(
                         color = PurpleCore,
                         letterSpacing = 2.sp
                     )
-                    Text(
-                        "My Device",
-                        fontFamily = DMSans,
-                        fontSize = 11.sp,
-                        color = TextMuted
-                    )
+                    
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     IconButton(onClick = onThemeToggle) {
                         Icon(
                             imageVector = if (isDark) Icons.Filled.LightMode else Icons.Filled.DarkMode,
                             contentDescription = "Toggle theme",
-                            tint = PurpleCore
-                        )
-                    }
-                    IconButton(onClick = { }) {
-                        Icon(
-                            Icons.Outlined.Notifications,
-                            contentDescription = "Notifications",
                             tint = PurpleCore
                         )
                     }
@@ -448,162 +467,6 @@ fun EmployeeDashboardScreen(
             Spacer(Modifier.height(16.dp))
 
             // ══════════════════════════════════════
-            // MY DEVICE STATUS CARD
-            // ══════════════════════════════════════
-            DevoraCard(accentColor = Success, isDark = isDark) {
-                Column {
-                SectionHeader(title = "MY DEVICE STATUS", isDark = isDark)
-
-                // Device name row
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column {
-                        Text(
-                            deviceInfo.model,
-                            fontFamily = PlusJakartaSans,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 16.sp,
-                            color = textColor
-                        )
-                        Text(
-                            deviceInfo.manufacturer.replaceFirstChar { it.uppercase() },
-                            fontFamily = DMSans,
-                            fontSize = 12.sp,
-                            color = TextMuted
-                        )
-                    }
-                    StatusBadge(status = "ONLINE")
-                }
-
-                Spacer(Modifier.height(12.dp))
-
-                // 2x2 status grid — Row 1
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    // Cell 1: Enrollment status
-                    DevoraCard(modifier = Modifier.weight(1f), isDark = isDark) {
-                        Column {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(8.dp)
-                                        .clip(CircleShape)
-                                        .background(Success)
-                                )
-                                Spacer(Modifier.width(6.dp))
-                                Text(
-                                    "ENROLLED",
-                                    fontFamily = JetBrainsMono,
-                                    fontSize = 10.sp,
-                                    color = Success
-                                )
-                            }
-                            Spacer(Modifier.height(4.dp))
-                            Text(
-                                if (isPolicySynced) "$activePolicyCount Active" else "Waiting",
-                                fontFamily = DMSans,
-                                fontSize = 12.sp,
-                                color = textColor
-                            )
-                        }
-                    }
-
-                    // Cell 2: Policy status
-                    DevoraCard(modifier = Modifier.weight(1f), isDark = isDark) {
-                        Column {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(8.dp)
-                                        .clip(CircleShape)
-                                        .background(PurpleCore)
-                                )
-                                Spacer(Modifier.width(6.dp))
-                                Text(
-                                    "POLICY",
-                                    fontFamily = JetBrainsMono,
-                                    fontSize = 10.sp,
-                                    color = PurpleCore
-                                )
-                            }
-                            Spacer(Modifier.height(4.dp))
-                            Text(
-                                "Active",
-                                fontFamily = DMSans,
-                                fontSize = 12.sp,
-                                color = textColor
-                            )
-                        }
-                    }
-                }
-
-                Spacer(Modifier.height(12.dp))
-
-                // 2x2 status grid — Row 2
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    // Cell 3: Last sync
-                    DevoraCard(modifier = Modifier.weight(1f), isDark = isDark) {
-                        Column {
-                            Text(
-                                "LAST SYNC",
-                                fontFamily = JetBrainsMono,
-                                fontSize = 10.sp,
-                                color = TextMuted
-                            )
-                            Spacer(Modifier.height(4.dp))
-                            Text(
-                                "2 mins ago",
-                                fontFamily = DMSans,
-                                fontSize = 12.sp,
-                                color = textColor
-                            )
-                        }
-                    }
-
-                    // Cell 4: Device health
-                    DevoraCard(modifier = Modifier.weight(1f), isDark = isDark) {
-                        Column {
-                            Text(
-                                "HEALTH",
-                                fontFamily = JetBrainsMono,
-                                fontSize = 10.sp,
-                                color = TextMuted
-                            )
-                            Spacer(Modifier.height(4.dp))
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    "Good",
-                                    fontFamily = DMSans,
-                                    fontSize = 12.sp,
-                                    color = Success
-                                )
-                                Spacer(Modifier.width(4.dp))
-                                Icon(
-                                    Icons.Filled.CheckCircle,
-                                    contentDescription = null,
-                                    tint = Success,
-                                    modifier = Modifier.size(12.dp)
-                                )
-                            }
-                        }
-                    }
-                }   
-                }
-            }
-
-            Spacer(Modifier.height(16.dp))
-
-            // ══════════════════════════════════════
             // DEVICE INFORMATION CARD
             // ══════════════════════════════════════
             DevoraCard(accentColor = PurpleCore, isDark = isDark) {
@@ -620,7 +483,7 @@ fun EmployeeDashboardScreen(
                     Triple("Android", deviceInfo.osVersion, textColor),
                     Triple("SDK Level", deviceInfo.sdkVersion.toString(), textColor),
                     Triple("Status", "Enrolled", Success),
-                    Triple("Policy", "Enterprise Standard", PurpleCore),
+                    Triple("Device Owner", if (isDeviceOwnerSet) "Set" else "Not Set", if (isDeviceOwnerSet) Success else Danger),
                     Triple("Server", "Connected", Success)
                 )
 
@@ -659,131 +522,258 @@ fun EmployeeDashboardScreen(
             Spacer(Modifier.height(16.dp))
 
             // ══════════════════════════════════════
-            // ACTIVE POLICIES CARD
+            // APP INVENTORY CARD
             // ══════════════════════════════════════
             DevoraCard(accentColor = PurpleCore, isDark = isDark) {
                 Column {
-                SectionHeader(title = "ACTIVE POLICIES ON THIS DEVICE", isDark = isDark)
+                SectionHeader(title = "APP INVENTORY ON THIS DEVICE", isDark = isDark)
 
-                data class PolicyStatus(
-                    val icon: ImageVector,
-                    val name: String,
-                    val status: String,
-                    val statusColor: Color
+                Text(
+                    "${appInventory.size} apps · ${userApps.size} user · ${systemApps.size} system",
+                    fontFamily = JetBrainsMono,
+                    fontSize = 11.sp,
+                    color = TextMuted,
+                    modifier = Modifier.padding(top = 8.dp)
                 )
 
-                val policies = listOf(
-                    PolicyStatus(
-                        Icons.Outlined.Lock,
-                        "Screen Lock Enforcement",
-                        when {
-                            !isPolicySynced -> "Waiting"
-                            policyState?.screenLockRequired == true -> "Required"
-                            else -> "Not Required"
-                        },
-                        when {
-                            !isPolicySynced -> Warning
-                            policyState?.screenLockRequired == true -> Success
-                            else -> TextMuted
-                        }
-                    ),
-                    PolicyStatus(
-                        Icons.Outlined.Shield,
-                        "Factory Reset Protection",
-                        if (isPolicySynced) "Unknown" else "Waiting",
-                        if (isPolicySynced) TextMuted else Warning
-                    ),
-                    PolicyStatus(
-                        Icons.Outlined.Block,
-                        "App Install Restriction",
-                        when {
-                            !isPolicySynced -> "Waiting"
-                            appInstallRestricted -> "Restricted"
-                            else -> "Allowed"
-                        },
-                        when {
-                            !isPolicySynced -> Warning
-                            appInstallRestricted -> Warning
-                            else -> Success
-                        }
-                    ),
-                    PolicyStatus(
-                        Icons.Outlined.CameraAlt,
-                        "Camera",
-                        when {
-                            !isPolicySynced -> "Waiting"
-                            policyState?.cameraDisabled == true -> "Disabled"
-                            else -> "Enabled"
-                        },
-                        when {
-                            !isPolicySynced -> Warning
-                            policyState?.cameraDisabled == true -> Warning
-                            else -> Success
-                        }
-                    )
-                )
+                Spacer(Modifier.height(10.dp))
 
-                policies.forEachIndexed { index, policy ->
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(42.dp)
+                        .background(if (isDark) DarkBgSurface else BgSurface, RoundedCornerShape(12.dp))
+                        .border(1.dp, PurpleBorder, RoundedCornerShape(12.dp))
+                        .padding(horizontal = 12.dp),
+                    contentAlignment = Alignment.CenterStart
+                ) {
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 12.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .clip(CircleShape)
-                                    .background(PurpleDim),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    policy.icon,
-                                    contentDescription = null,
-                                    tint = PurpleCore,
-                                    modifier = Modifier.size(18.dp)
+                        Icon(
+                            Icons.Filled.Search,
+                            contentDescription = null,
+                            tint = PurpleCore,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.width(8.dp))
+
+                        Box(modifier = Modifier.weight(1f)) {
+                            if (appSearchQuery.isEmpty()) {
+                                Text(
+                                    "Search apps...",
+                                    fontFamily = DMSans,
+                                    fontSize = 13.sp,
+                                    color = TextMuted
                                 )
                             }
-                            Spacer(Modifier.width(12.dp))
-                            Text(
-                                policy.name,
-                                fontFamily = DMSans,
-                                fontSize = 13.sp,
-                                color = textColor
+                            BasicTextField(
+                                value = appSearchQuery,
+                                onValueChange = { appSearchQuery = it },
+                                textStyle = TextStyle(
+                                    fontFamily = DMSans,
+                                    fontSize = 13.sp,
+                                    color = textColor
+                                ),
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth()
                             )
                         }
 
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(100.dp))
-                                .background(policy.statusColor.copy(alpha = 0.10f))
-                                .border(
-                                    1.dp,
-                                    policy.statusColor.copy(alpha = 0.25f),
-                                    RoundedCornerShape(100.dp)
-                                )
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
-                        ) {
-                            Text(
-                                policy.status,
-                                fontFamily = JetBrainsMono,
-                                fontSize = 10.sp,
-                                color = policy.statusColor,
-                                fontWeight = FontWeight.Bold
+                        if (appSearchQuery.isNotEmpty()) {
+                            Icon(
+                                Icons.Filled.Close,
+                                contentDescription = "Clear",
+                                tint = TextMuted,
+                                modifier = Modifier
+                                    .size(18.dp)
+                                    .clickable(
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = null,
+                                        onClick = { appSearchQuery = "" }
+                                    )
                             )
                         }
                     }
+                }
 
-                    if (index < policies.size - 1) {
-                        HorizontalDivider(
-                            color = PurpleCore.copy(alpha = 0.08f),
-                            thickness = 1.dp
+                Spacer(Modifier.height(10.dp))
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(
+                        "ALL" to appInventory.size,
+                        "USER" to userApps.size,
+                        "SYSTEM" to systemApps.size
+                    ).forEach { (filter, count) ->
+                        val isSelected = appFilter == filter
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(
+                                    if (isSelected) PurpleCore.copy(alpha = 0.12f)
+                                    else if (isDark) DarkBgSurface else BgSurface,
+                                    RoundedCornerShape(20.dp)
+                                )
+                                .border(
+                                    1.dp,
+                                    if (isSelected) PurpleCore.copy(alpha = 0.40f)
+                                    else PurpleCore.copy(alpha = 0.15f),
+                                    RoundedCornerShape(20.dp)
+                                )
+                                .clickable { appFilter = filter }
+                                .padding(horizontal = 12.dp, vertical = 6.dp)
+                        ) {
+                            Text(
+                                "$filter ($count)",
+                                fontFamily = if (isSelected) PlusJakartaSans else DMSans,
+                                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                                fontSize = 11.sp,
+                                color = if (isSelected) PurpleCore else TextMuted
+                            )
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(8.dp))
+
+                if (isAppInventoryLoading) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 18.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            "Loading app inventory...",
+                            fontFamily = DMSans,
+                            fontSize = 12.sp,
+                            color = TextMuted
                         )
+                    }
+                } else if (filteredApps.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 18.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(
+                                Icons.Outlined.Apps,
+                                contentDescription = null,
+                                tint = PurpleCore.copy(alpha = 0.6f),
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                if (appInventory.isEmpty()) {
+                                    "No app inventory available yet"
+                                } else {
+                                    "No apps match your search"
+                                },
+                                fontFamily = DMSans,
+                                fontSize = 12.sp,
+                                color = TextMuted
+                            )
+                        }
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(340.dp)
+                            .pointerInput(Unit) {
+                                awaitPointerEventScope {
+                                    while (true) {
+                                        val event = awaitPointerEvent()
+                                        lockParentScrollForApps = event.changes.any { it.pressed }
+                                    }
+                                }
+                            },
+                        verticalArrangement = Arrangement.spacedBy(0.dp)
+                    ) {
+                        items(filteredApps, key = { it.id }) { app ->
+                            val isRestricted = app.packageName in restrictedPackages
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(if (isRestricted) Danger.copy(alpha = 0.10f) else PurpleDim),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (isRestricted) {
+                                        Icon(
+                                            Icons.Outlined.Block,
+                                            contentDescription = null,
+                                            tint = Danger,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    } else {
+                                        Text(
+                                            app.appName.take(1).uppercase(),
+                                            fontFamily = PlusJakartaSans,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 14.sp,
+                                            color = PurpleCore
+                                        )
+                                    }
+                                }
+
+                                Spacer(Modifier.width(10.dp))
+
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        app.appName,
+                                        fontFamily = DMSans,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = if (isRestricted) Danger else textColor
+                                    )
+                                    Text(
+                                        app.packageName,
+                                        fontFamily = JetBrainsMono,
+                                        fontSize = 9.sp,
+                                        color = TextMuted
+                                    )
+                                }
+
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(100.dp))
+                                        .background(
+                                            if (isRestricted) Danger.copy(alpha = 0.10f)
+                                            else Success.copy(alpha = 0.10f)
+                                        )
+                                        .border(
+                                            1.dp,
+                                            if (isRestricted) Danger.copy(alpha = 0.25f)
+                                            else Success.copy(alpha = 0.25f),
+                                            RoundedCornerShape(100.dp)
+                                        )
+                                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                                ) {
+                                    Text(
+                                        if (isRestricted) "Restricted" else "Allowed",
+                                        fontFamily = JetBrainsMono,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isRestricted) Danger else Success
+                                    )
+                                }
+                            }
+
+                            HorizontalDivider(
+                                color = PurpleCore.copy(alpha = 0.06f),
+                                thickness = 1.dp
+                            )
+                        }
                     }
                 }
                 }
