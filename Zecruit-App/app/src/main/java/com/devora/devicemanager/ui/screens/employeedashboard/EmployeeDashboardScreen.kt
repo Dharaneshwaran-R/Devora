@@ -55,6 +55,7 @@ import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.PhoneAndroid
 import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material.icons.outlined.SupportAgent
+import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material.icons.outlined.Wifi
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -94,6 +95,10 @@ import com.devora.devicemanager.AdminReceiver
 import com.devora.devicemanager.collector.DeviceInfoCollector
 import com.devora.devicemanager.network.AppInventoryItem
 import com.devora.devicemanager.session.SessionManager
+import com.devora.devicemanager.sync.DeviceInfoSyncWorker
+import com.devora.devicemanager.sync.LocationSyncWorker
+import com.devora.devicemanager.sync.PolicySyncWorker
+import com.devora.devicemanager.sync.SyncManager
 import com.devora.devicemanager.ui.components.DevoraCard
 import com.devora.devicemanager.ui.components.SectionHeader
 import com.devora.devicemanager.ui.theme.BgBase
@@ -159,6 +164,7 @@ fun EmployeeDashboardScreen(
     var appSearchQuery by remember { mutableStateOf("") }
     var appFilter by remember { mutableStateOf("ALL") }
     var lockParentScrollForApps by remember { mutableStateOf(false) }
+    var isQuickSyncRunning by remember { mutableStateOf(false) }
 
     fun getTimeAgo(timestamp: Long): String {
         val diff = (System.currentTimeMillis() - timestamp).coerceAtLeast(0L)
@@ -378,6 +384,51 @@ fun EmployeeDashboardScreen(
                     
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    IconButton(
+                        enabled = !isQuickSyncRunning,
+                        onClick = {
+                            scope.launch {
+                                isQuickSyncRunning = true
+                                try {
+                                    val employeeId = employeePrefs
+                                        .getString("employee_id", "unknown")
+                                        ?.takeIf { it.isNotBlank() }
+                                        ?: "unknown"
+
+                                    // Immediate full sync (apps + device info), then force location/policy refresh.
+                                    val syncResult = SyncManager.syncDeviceData(context, employeeId)
+                                    DeviceInfoSyncWorker.scheduleNow(context)
+                                    LocationSyncWorker.scheduleNow(context)
+                                    PolicySyncWorker.scheduleNow(context)
+
+                                    loadActivities()
+                                    loadAppInventory()
+
+                                    val msg = if (syncResult.success) {
+                                        "Synced latest apps, Android info, and location"
+                                    } else {
+                                        "Sync sent. Some data may update shortly"
+                                    }
+                                    Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                                } catch (e: Exception) {
+                                    Toast.makeText(
+                                        context,
+                                        "Sync failed: ${e.message ?: "Unknown error"}",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                } finally {
+                                    isQuickSyncRunning = false
+                                }
+                            }
+                        }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Sync,
+                            contentDescription = "Sync and refresh location",
+                            tint = if (isQuickSyncRunning) PurpleCore.copy(alpha = 0.45f) else PurpleCore
+                        )
+                    }
+
                     IconButton(onClick = onThemeToggle) {
                         Icon(
                             imageVector = if (isDark) Icons.Filled.LightMode else Icons.Filled.DarkMode,

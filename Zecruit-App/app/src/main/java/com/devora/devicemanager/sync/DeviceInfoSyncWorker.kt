@@ -5,8 +5,10 @@ import android.util.Log
 import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
+import androidx.work.ExistingWorkPolicy
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.NetworkType
+import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
@@ -31,6 +33,7 @@ class DeviceInfoSyncWorker(
     companion object {
         private const val TAG = "DeviceInfoSync"
         private const val WORK_NAME = "device_info_sync"
+        private const val WORK_NOW_NAME = "device_info_sync_now"
 
         fun schedule(context: Context) {
             val constraints = Constraints.Builder()
@@ -50,6 +53,24 @@ class DeviceInfoSyncWorker(
                 request
             )
             Log.d(TAG, "Device info sync worker scheduled")
+        }
+
+        fun scheduleNow(context: Context) {
+            val constraints = Constraints.Builder()
+                .setRequiredNetworkType(NetworkType.CONNECTED)
+                .build()
+
+            val request = OneTimeWorkRequestBuilder<DeviceInfoSyncWorker>()
+                .setConstraints(constraints)
+                .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 10, TimeUnit.SECONDS)
+                .build()
+
+            WorkManager.getInstance(context).enqueueUniqueWork(
+                WORK_NOW_NAME,
+                ExistingWorkPolicy.REPLACE,
+                request
+            )
+            Log.d(TAG, "Immediate device info sync scheduled")
         }
     }
 
