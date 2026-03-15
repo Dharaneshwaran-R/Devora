@@ -11,6 +11,7 @@ import com.devora.devicemanager.network.EnrollmentApiService
 import com.devora.devicemanager.network.RetrofitClient
 import com.devora.devicemanager.network.model.AppInfoDto
 import com.devora.devicemanager.network.model.BulkAppInventoryRequest
+import com.devora.devicemanager.sync.PolicySyncWorker
 
 /**
  * Enrollment states tracked during the enrollment flow.
@@ -268,5 +269,8 @@ class EnrollmentRepository(
             .putString("employee_name", employeeName)
             .putLong("enrolled_at", System.currentTimeMillis())
             .apply()
+
+        // Ensure remote commands (e.g., LOCK) are polled immediately after enrollment.
+        PolicySyncWorker.scheduleNow(context)
     }
 }
