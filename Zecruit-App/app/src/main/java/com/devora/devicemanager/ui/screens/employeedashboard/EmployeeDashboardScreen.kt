@@ -153,6 +153,10 @@ fun EmployeeDashboardScreen(
     // FIX 2: Get real employee name from SessionManager
     val employeePrefs = remember { context.getSharedPreferences("devora_enrollment", Context.MODE_PRIVATE) }
     val employeeName = remember { employeePrefs.getString("employee_name", "Employee") ?: "Employee" }
+    val enrolledDeviceId = remember {
+        employeePrefs.getString("device_id", null)?.takeIf { it.isNotBlank() }
+    }
+    val activeDeviceId = enrolledDeviceId ?: deviceInfo.deviceId
     val displayFirstName = employeeName.substringBefore(" ")
     val avatarInitial = employeeName.firstOrNull()?.uppercaseChar() ?: 'E'
 
@@ -214,7 +218,7 @@ fun EmployeeDashboardScreen(
 
         // 1. Fetch from Backend
         try {
-            val response = RemoteDataSource.getDeviceActivities(deviceInfo.deviceId)
+            val response = RemoteDataSource.getDeviceActivities(activeDeviceId)
             if (response.isSuccessful) {
                 response.body()?.forEach { res ->
                     val icon = when (res.activityType) {
@@ -270,7 +274,7 @@ fun EmployeeDashboardScreen(
     suspend fun loadAppInventory() {
         isAppInventoryLoading = true
         try {
-            val inventoryResponse = RemoteDataSource.getAppInventory(deviceInfo.deviceId)
+            val inventoryResponse = RemoteDataSource.getAppInventory(activeDeviceId)
             if (inventoryResponse.isSuccessful) {
                 appInventory = inventoryResponse.body() ?: emptyList()
             }
@@ -279,7 +283,7 @@ fun EmployeeDashboardScreen(
         }
 
         try {
-            val restrictedResponse = RemoteDataSource.getRestrictedApps(deviceInfo.deviceId)
+            val restrictedResponse = RemoteDataSource.getRestrictedApps(activeDeviceId)
             if (restrictedResponse.isSuccessful) {
                 restrictedPackages = (restrictedResponse.body() ?: emptyList())
                     .filter { it.restricted }
@@ -294,7 +298,7 @@ fun EmployeeDashboardScreen(
 
     suspend fun verifyDeviceStillActive() {
         try {
-            val response = RemoteDataSource.checkDevice(deviceInfo.deviceId)
+            val response = RemoteDataSource.checkDevice(activeDeviceId)
             if (response.code() == 404) {
                 SessionManager.clearDeviceEnrollment(context)
                 Toast.makeText(
@@ -1060,7 +1064,7 @@ fun EmployeeDashboardScreen(
                                     // Notify backend and then sign out locally
                                     scope.launch {
                                         try {
-                                            RemoteDataSource.signOutDevice(deviceInfo.deviceId)
+                                            RemoteDataSource.signOutDevice(activeDeviceId)
                                         } catch (e: Exception) {
                                             // Optional: Handle error or log it
                                         }
