@@ -16,6 +16,7 @@ import com.mdm.mdm_backend.repository.DeviceAppRestrictionRepository;
 import com.mdm.mdm_backend.repository.DeviceCommandRepository;
 import com.mdm.mdm_backend.repository.DevicePolicyRepository;
 import com.mdm.mdm_backend.repository.MdmAlertRepository;
+import com.mdm.mdm_backend.repository.RestrictedAppRepository;
 import com.mdm.mdm_backend.repository.DeviceInfoRepository;
 import com.mdm.mdm_backend.repository.DeviceRepository;
 import com.mdm.mdm_backend.repository.EmployeeRepository;
@@ -43,6 +44,7 @@ public class EnrollmentService {
     private final DeviceInfoRepository deviceInfoRepository;
     private final AppInventoryRepository appInventoryRepository;
     private final AdminNotificationRepository adminNotificationRepository;
+    private final RestrictedAppRepository restrictedAppRepository;
     private final DeviceAppRestrictionRepository appRestrictionRepository;
     private final DevicePolicyRepository policyRepository;
     private final DeviceCommandRepository commandRepository;
@@ -290,25 +292,28 @@ public class EnrollmentService {
         // 3) Admin notifications
         adminNotificationRepository.deleteByDeviceId(deviceId);
 
-        // 4) New app restrictions table
+        // 4) Old restricted apps table
+        restrictedAppRepository.deleteByDeviceId(deviceId);
+
+        // 5) New app restrictions table
         appRestrictionRepository.deleteByDeviceId(deviceId);
 
-        // 5) Policies
+        // 6) Policies
         policyRepository.deleteByDeviceId(deviceId);
 
-        // 6) Location
+        // 7) Location
         accurateLocationRepository.deleteByDeviceId(deviceId);
 
-        // 7) Commands
+        // 8) Commands
         commandRepository.deleteByDeviceId(deviceId);
 
-        // 8) Activities
+        // 9) Activities
         activityRepository.deleteByDeviceId(deviceId);
 
-        // 9) Alerts
+        // 10) Alerts
         alertRepository.deleteByDeviceId(deviceId);
 
-        // 10) Revoke enrollment tokens
+        // 11) Revoke enrollment tokens
         List<EnrollmentToken> tokens = enrollmentTokenRepository.findByDeviceId(deviceId);
         for (EnrollmentToken token : tokens) {
             token.setStatus("REVOKED");
@@ -317,10 +322,10 @@ public class EnrollmentService {
             enrollmentTokenRepository.saveAll(tokens);
         }
 
-        // 11) Delete device
+        // 12) Delete device
         deviceRepository.delete(device.get());
 
-        // 12) Clear employee link
+        // 13) Clear employee link
         employeeRepository.findByDeviceId(deviceId).ifPresent(employee -> {
             employee.setDeviceId(null);
             employee.setDeviceName(null);
@@ -368,7 +373,8 @@ public class EnrollmentService {
         deviceRepository.findAll().forEach(device -> {
             String current = device.getStatus() == null ? "" : device.getStatus().trim().toUpperCase();
 
-            // Keep explicit sign-out devices offline until a fresh enroll flow sets ACTIVE again.
+            // Keep explicit sign-out devices offline until a fresh enroll flow sets ACTIVE
+            // again.
             if ("OFFLINE".equals(current)) {
                 return;
             }
