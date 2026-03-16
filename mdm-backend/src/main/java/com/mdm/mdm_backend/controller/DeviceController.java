@@ -87,7 +87,6 @@ public class DeviceController {
     @GetMapping("/devices/check/{deviceId}")
     public ResponseEntity<DeviceResponse> checkDevice(@PathVariable String deviceId) {
         return enrollmentService.getDeviceAsResponse(deviceId)
-                .filter(device -> "ACTIVE".equalsIgnoreCase(device.getStatus()))
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.status(HttpStatus.NOT_FOUND).build());
     }
