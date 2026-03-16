@@ -347,6 +347,18 @@ public class EnrollmentService {
                 LocalDateTime.now());
     }
 
+    @Transactional
+    public Optional<Device> recordHeartbeat(String deviceId) {
+        return deviceRepository.findByDeviceId(deviceId).map(device -> {
+            LocalDateTime now = LocalDateTime.now();
+            device.setLastSeenAt(now);
+            if ("OFFLINE".equalsIgnoreCase(device.getStatus())) {
+                device.setStatus("ACTIVE");
+            }
+            return deviceRepository.save(device);
+        });
+    }
+
     @Scheduled(fixedDelay = 300_000)
     @Transactional
     public void expireOldTokens() {
@@ -371,14 +383,6 @@ public class EnrollmentService {
         LocalDateTime cutoff = LocalDateTime.now().minusMinutes(DEVICE_OFFLINE_HEARTBEAT_WINDOW_MINUTES);
 
         deviceRepository.findAll().forEach(device -> {
-            String current = device.getStatus() == null ? "" : device.getStatus().trim().toUpperCase();
-
-            // Keep explicit sign-out devices offline until a fresh enroll flow sets ACTIVE
-            // again.
-            if ("OFFLINE".equals(current)) {
-                return;
-            }
-
             LocalDateTime lastSeen = device.getLastSeenAt();
             if (lastSeen == null) {
                 lastSeen = deviceInfoRepository

@@ -56,6 +56,14 @@ public class DeviceController {
                                 .orElse(ResponseEntity.notFound().build());
         }
 
+        @PostMapping("/devices/{deviceId}/heartbeat")
+        public ResponseEntity<Map<String, String>> heartbeat(@PathVariable String deviceId) {
+                return enrollmentService.recordHeartbeat(deviceId)
+                                .map(device -> ResponseEntity.ok(Map.of("status", "ok")))
+                                .orElse(ResponseEntity.status(HttpStatus.NOT_FOUND)
+                                                .body(Map.of("message", "Device not found")));
+        }
+
         @DeleteMapping("/devices/{deviceId}")
         public ResponseEntity<Map<String, String>> deleteDevice(@PathVariable String deviceId) {
                 try {

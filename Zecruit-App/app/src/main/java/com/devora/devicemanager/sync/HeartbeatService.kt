@@ -85,8 +85,12 @@ class HeartbeatService : Service() {
                 val deviceId = prefs.getString("device_id", null)
                 if (deviceId != null) {
                     try {
-                        RetrofitClient.api.sendHeartbeat(deviceId)
-                        Log.d(TAG, "Heartbeat sent for $deviceId")
+                        val response = RetrofitClient.api.sendHeartbeat(deviceId)
+                        if (response.isSuccessful) {
+                            Log.d(TAG, "Heartbeat sent for $deviceId")
+                        } else {
+                            Log.w(TAG, "Heartbeat failed for $deviceId with HTTP ${response.code()}")
+                        }
                     } catch (e: Exception) {
                         Log.w(TAG, "Heartbeat failed: ${e.message}")
                     }
