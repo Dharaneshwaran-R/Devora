@@ -48,7 +48,7 @@ object QrProvisioningHelper {
     private const val DEFAULT_APK_DOWNLOAD_URL =
         "https://devora-production-dd2e.up.railway.app/downloads/devora-mdm-latest.apk"
     private const val DEFAULT_CHECKSUM =
-        "gAtjMHFnP3rlJlti5lg83dqFDiA00sU5G455VBxOPJc="
+        "zr4L-_kEAKszSP5zY_epOfpBsBdGCdcGCAcXVo_SHyI"
 
     /**
      * Builds the JSON payload for a Device Owner provisioning QR code.
