@@ -22,6 +22,7 @@ public class DeviceResponse {
     private String osVersion;
     private String sdkVersion;
     private String serialNumber;
+    private Boolean deviceOwnerSet;
     private LocalDateTime enrolledAt;
     private String status;
 }

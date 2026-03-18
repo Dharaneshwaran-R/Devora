@@ -136,6 +136,7 @@ class EnrollmentRepository(
                         serialNumber = deviceInfo.serialNumber,
                         imei = deviceInfo.imei,
                         deviceType = deviceInfo.deviceType,
+                        deviceOwnerSet = deviceInfo.deviceOwnerSet,
                         employeeId = enrollData?.employeeId
                     )
                 )

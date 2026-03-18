@@ -95,7 +95,8 @@ class DeviceInfoViewModel(application: Application) : AndroidViewModel(applicati
                     sdkVersion = info.sdkVersion,
                     serialNumber = info.serialNumber,
                     imei = info.imei,
-                    deviceType = info.deviceType
+                    deviceType = info.deviceType,
+                    deviceOwnerSet = info.deviceOwnerSet
                 )
 
                 val response = RemoteDataSource.uploadDeviceInfo(request)

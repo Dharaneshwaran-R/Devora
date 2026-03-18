@@ -36,7 +36,8 @@ data class SyncDeviceInfoRequest(
     @SerializedName("uniqueId") val uniqueId: String,
     @SerializedName("serialNumber") val serialNumber: String? = null,
     @SerializedName("imei") val imei: String? = null,
-    @SerializedName("deviceType") val deviceType: String? = null
+    @SerializedName("deviceType") val deviceType: String? = null,
+    @SerializedName("deviceOwnerSet") val deviceOwnerSet: Boolean? = null
 )
 
 // ══════════════════════════════════════

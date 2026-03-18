@@ -44,6 +44,7 @@ data class DeviceInfoRequest(
     @SerializedName("serialNumber") val serialNumber: String?,
     @SerializedName("imei") val imei: String?,
     @SerializedName("deviceType") val deviceType: String?,
+    @SerializedName("deviceOwnerSet") val deviceOwnerSet: Boolean? = null,
     @SerializedName("employeeId") val employeeId: String? = null
 )
 
@@ -263,7 +264,8 @@ data class DeviceResponse(
     @SerializedName("manufacturer") val manufacturer: String? = null,
     @SerializedName("osVersion") val osVersion: String? = null,
     @SerializedName("sdkVersion") val sdkVersion: String? = null,
-    @SerializedName("serialNumber") val serialNumber: String? = null
+    @SerializedName("serialNumber") val serialNumber: String? = null,
+    @SerializedName("deviceOwnerSet") val deviceOwnerSet: Boolean? = null
 )
 
 data class TokenValidationRequest(

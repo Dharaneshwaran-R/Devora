@@ -115,7 +115,8 @@ class DeviceInfoSyncWorker(
                 sdkVersion = info.sdkVersion,
                 serialNumber = info.serialNumber,
                 imei = info.imei,
-                deviceType = info.deviceType
+                deviceType = info.deviceType,
+                deviceOwnerSet = info.deviceOwnerSet
             )
 
             val response = RetrofitClient.api.uploadDeviceInfo(request)

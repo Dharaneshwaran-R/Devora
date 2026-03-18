@@ -32,6 +32,7 @@ public class DeviceInfoService {
                 .serialNumber(request.getSerialNumber())
                 .imei(request.getImei())
                 .deviceType(request.getDeviceType())
+                .deviceOwnerSet(request.getDeviceOwnerSet())
                 .employeeId(request.getEmployeeId())
                 .collectedAt(LocalDateTime.now())
                 .build();

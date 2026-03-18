@@ -221,6 +221,7 @@ public class EnrollmentService {
         String osVersion = null;
         String sdkVersion = null;
         String serialNumber = null;
+        Boolean deviceOwnerSet = null;
 
         // Enrich from latest device_info if fields are missing
         List<DeviceInfo> infoList = deviceInfoRepository.findByDeviceIdOrderByCollectedAtDesc(device.getDeviceId());
@@ -233,6 +234,7 @@ public class EnrollmentService {
             osVersion = latest.getOsVersion();
             sdkVersion = latest.getSdkVersion();
             serialNumber = latest.getSerialNumber();
+            deviceOwnerSet = latest.getDeviceOwnerSet();
         }
 
         if ((employeeName == null || employeeName.isBlank()) || (employeeId == null || employeeId.isBlank())) {
@@ -255,6 +257,7 @@ public class EnrollmentService {
                 .osVersion(osVersion)
                 .sdkVersion(sdkVersion)
                 .serialNumber(serialNumber)
+                .deviceOwnerSet(deviceOwnerSet)
                 .enrolledAt(device.getEnrolledAt())
                 .status(device.getStatus())
                 .build();

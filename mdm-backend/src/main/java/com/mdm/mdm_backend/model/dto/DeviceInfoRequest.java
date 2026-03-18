@@ -16,5 +16,6 @@ public class DeviceInfoRequest {
     private String serialNumber;
     private String imei;
     private String deviceType;
+    private Boolean deviceOwnerSet;
     private String employeeId;
 }

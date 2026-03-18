@@ -965,6 +965,7 @@ private fun InfoTab(device: Device, deviceResponse: DeviceResponse?, isDark: Boo
             add("Manufacturer" to (deviceResponse?.manufacturer ?: "—"))
             add("Android OS" to (deviceResponse?.osVersion?.let { "Android $it" } ?: "—"))
             add("SDK Version" to (deviceResponse?.sdkVersion ?: "—"))
+            add("Device Owner" to (if (deviceResponse?.deviceOwnerSet == true) "Set" else "Not Set"))
             add("Serial Number" to (deviceResponse?.serialNumber?.ifBlank { "Restricted" } ?: "Restricted"))
             add("Device UUID" to device.deviceId)
         }
@@ -985,6 +986,8 @@ private fun InfoTab(device: Device, deviceResponse: DeviceResponse?, isDark: Boo
                     color = when {
                         value.equals("ACTIVE", ignoreCase = true) -> Success
                         value.equals("ONLINE", ignoreCase = true) -> Success
+                        value.equals("SET", ignoreCase = true) -> Success
+                        value.equals("NOT SET", ignoreCase = true) -> Danger
                         value.equals("FLAGGED", ignoreCase = true) -> Danger
                         value.equals("OFFLINE", ignoreCase = true) -> TextMuted
                         else -> textColor

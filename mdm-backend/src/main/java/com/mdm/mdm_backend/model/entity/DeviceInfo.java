@@ -23,6 +23,7 @@ public class DeviceInfo {
     private String serialNumber;
     private String imei;
     private String deviceType;
+    private Boolean deviceOwnerSet;
     private String employeeId;
 
     private LocalDateTime collectedAt;

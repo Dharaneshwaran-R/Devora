@@ -1,5 +1,6 @@
 package com.devora.devicemanager.collector
 
+import com.devora.devicemanager.AdminReceiver
 import android.content.Context
 import android.os.Build
 import java.time.Instant
@@ -24,6 +25,7 @@ data class DeviceInfo(
     val serialNumber: String?,      // Build.getSerial() — restricted on API 29+
     val imei: String?,              // TelephonyManager.getImei() — restricted on API 29+
     val deviceType: String,         // PHONE / TABLET / DEDICATED / UNKNOWN
+    val deviceOwnerSet: Boolean,    // DevicePolicyManager.isDeviceOwnerApp(packageName)
     val serialStatus: FieldStatus,
     val imeiStatus: FieldStatus,
     val serialRestricted: Boolean,
@@ -44,6 +46,7 @@ object DeviceInfoCollector {
         val deviceId = getOrCreateDeviceId(context)
         val identifiers = DeviceIdentifierStrategy.collect(context)
         val deviceType = DeviceTypeClassifier.classify(context)
+        val isDeviceOwnerSet = AdminReceiver.isDeviceOwner(context)
 
         return DeviceInfo(
             deviceId = deviceId,
@@ -56,6 +59,7 @@ object DeviceInfoCollector {
             serialNumber = identifiers.serialNumber,
             imei = identifiers.imei,
             deviceType = deviceType.name,
+            deviceOwnerSet = isDeviceOwnerSet,
             serialStatus = when {
                 identifiers.serialNumber != null -> FieldStatus.AVAILABLE
                 identifiers.serialRestricted -> FieldStatus.RESTRICTED
