@@ -1,10 +1,12 @@
 package com.devora.devicemanager.ui.screens.enrollment
 
 import com.devora.devicemanager.data.remote.RemoteDataSource
+import android.content.Context
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
 import android.graphics.Bitmap
+import androidx.core.content.FileProvider
 import android.widget.Toast
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
@@ -64,6 +66,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.animation.core.animateFloatAsState
@@ -111,6 +114,8 @@ import com.devora.devicemanager.network.GenerateEnrollmentTokenRequest
 import com.devora.devicemanager.network.EnrollmentTokenResponse
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.io.File
+import java.io.FileOutputStream
 import java.time.Instant
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -208,16 +213,16 @@ fun AdminGenerateEnrollmentScreen(
     onNavigate: (String) -> Unit,
     isDark: Boolean
 ) {
-    var screenState by remember { mutableStateOf("FORM") }
-    var deviceLabel by remember { mutableStateOf("") }
-    var assignedEmployee by remember { mutableStateOf("") }
-    var employeeName by remember { mutableStateOf("") }
-    var selectedDepartment by remember { mutableStateOf("") }
-    var selectedDeviceType by remember { mutableStateOf("") }
+    var screenState by rememberSaveable { mutableStateOf("FORM") }
+    var deviceLabel by rememberSaveable { mutableStateOf("") }
+    var assignedEmployee by rememberSaveable { mutableStateOf("") }
+    var employeeName by rememberSaveable { mutableStateOf("") }
+    var selectedDepartment by rememberSaveable { mutableStateOf("") }
+    var selectedDeviceType by rememberSaveable { mutableStateOf("") }
     val selectedValidity = "1h"
-    var enrollType by remember { mutableStateOf("QR") }
+    var enrollType by rememberSaveable { mutableStateOf("QR") }
     var isGenerating by remember { mutableStateOf(false) }
-    var generatedToken by remember { mutableStateOf("") }
+    var generatedToken by rememberSaveable { mutableStateOf("") }
     var showDeptDropdown by remember { mutableStateOf(false) }
     var showTypeDropdown by remember { mutableStateOf(false) }
     var showRevokeDialog by remember { mutableStateOf(false) }
@@ -247,6 +252,15 @@ fun AdminGenerateEnrollmentScreen(
     val inputBg = if (isDark) DarkBgElevated else BgElevated
 
     val activeEnrollments = remember { mutableStateListOf<EnrollmentSession>() }
+    val provisioningQrBitmap: Bitmap? = remember(generatedToken) {
+        if (generatedToken.isBlank()) {
+            null
+        } else {
+            QrProvisioningHelper.generateDeviceOwnerProvisioningQr(
+                enrollmentToken = generatedToken
+            )
+        }
+    }
 
     val visibleEnrollments = activeEnrollments
         .filterNot { locallyRevokedIds.contains(it.id) }
@@ -595,6 +609,12 @@ fun AdminGenerateEnrollmentScreen(
                             currentTick = tickTrigger,
                             isDark = isDark,
                             textColor = textColor,
+                            onOpenQr = {
+                                generatedToken = session.token
+                                employeeName = session.deviceLabel
+                                assignedEmployee = session.assignedEmployee.substringAfterLast("(").substringBefore(")")
+                                screenState = "GENERATED"
+                            },
                             onRevoke = {
                                 revokeTargetId = session.id
                                 showRevokeDialog = true
@@ -665,12 +685,6 @@ fun AdminGenerateEnrollmentScreen(
                             Spacer(Modifier.height(16.dp))
 
                             // Device Owner provisioning QR with full payload for auto-install
-                            val qrBitmap: Bitmap? = remember(generatedToken) {
-                                QrProvisioningHelper.generateDeviceOwnerProvisioningQr(
-                                    enrollmentToken = generatedToken
-                                )
-                            }
-
                             Box(
                                 modifier = Modifier
                                     .size(260.dp)
@@ -679,9 +693,9 @@ fun AdminGenerateEnrollmentScreen(
                                     .border(2.dp, PurpleCore, RoundedCornerShape(16.dp)),
                                 contentAlignment = Alignment.Center
                             ) {
-                                if (qrBitmap != null) {
+                                if (provisioningQrBitmap != null) {
                                     Image(
-                                        bitmap = qrBitmap.asImageBitmap(),
+                                        bitmap = provisioningQrBitmap.asImageBitmap(),
                                         contentDescription = "Enrollment QR Code",
                                         modifier = Modifier
                                             .size(230.dp)
@@ -741,14 +755,24 @@ fun AdminGenerateEnrollmentScreen(
                                         .background(PurpleDim)
                                         .border(1.dp, PurpleBorder, RoundedCornerShape(10.dp))
                                         .clickable {
-                                            val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                                                type = "text/plain"
-                                                putExtra(
-                                                    Intent.EXTRA_TEXT,
-                                                    "DEVORA Enrollment QR\nToken: $generatedToken\nDevice: $deviceLabel"
-                                                )
+                                            if (provisioningQrBitmap == null) {
+                                                coroutineScope.launch {
+                                                    snackbarHostState.showSnackbar("QR image not ready")
+                                                }
+                                                return@clickable
                                             }
-                                            context.startActivity(Intent.createChooser(shareIntent, "Share"))
+
+                                            val ok = shareQrBitmap(
+                                                context = context,
+                                                bitmap = provisioningQrBitmap,
+                                                token = generatedToken,
+                                                label = employeeName.ifBlank { deviceLabel }
+                                            )
+                                            if (!ok) {
+                                                coroutineScope.launch {
+                                                    snackbarHostState.showSnackbar("Failed to share QR image")
+                                                }
+                                            }
                                         },
                                     contentAlignment = Alignment.Center
                                 ) {
@@ -996,6 +1020,12 @@ fun AdminGenerateEnrollmentScreen(
                             currentTick = tickTrigger,
                             isDark = isDark,
                             textColor = textColor,
+                            onOpenQr = {
+                                generatedToken = session.token
+                                employeeName = session.deviceLabel
+                                assignedEmployee = session.assignedEmployee.substringAfterLast("(").substringBefore(")")
+                                screenState = "GENERATED"
+                            },
                             onRevoke = {
                                 revokeTargetId = session.id
                                 showRevokeDialog = true
@@ -1240,9 +1270,16 @@ private fun ActiveEnrollmentCard(
     currentTick: Long,
     isDark: Boolean,
     textColor: Color,
+    onOpenQr: () -> Unit,
     onRevoke: () -> Unit
 ) {
-    DevoraCard(isDark = isDark, accentColor = Warning, modifier = Modifier.fillMaxWidth()) {
+    DevoraCard(
+        isDark = isDark,
+        accentColor = Warning,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onOpenQr() }
+    ) {
         val expiryState = remember(session.expiresAtRaw, currentTick) {
             getTokenExpiryState(session.expiresAtRaw, currentTick)
         }
@@ -1371,5 +1408,37 @@ private fun ActiveEnrollmentCard(
                 }
             }
         }
+    }
+}
+
+private fun shareQrBitmap(
+    context: Context,
+    bitmap: Bitmap,
+    token: String,
+    label: String
+): Boolean {
+    return try {
+        val file = File(context.cacheDir, "enrollment_qr_${System.currentTimeMillis()}.png")
+        FileOutputStream(file).use { out ->
+            bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+        }
+
+        val uri = FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.fileprovider",
+            file
+        )
+
+        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+            type = "image/png"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            putExtra(Intent.EXTRA_TEXT, "DEVORA Enrollment QR\nToken: $token\nEmployee: $label")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+
+        context.startActivity(Intent.createChooser(shareIntent, "Share Enrollment QR"))
+        true
+    } catch (_: Exception) {
+        false
     }
 }
