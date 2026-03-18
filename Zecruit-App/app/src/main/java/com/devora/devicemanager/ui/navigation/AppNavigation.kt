@@ -87,10 +87,7 @@ fun AppNavigation(
                         // 2. Check if Employee is already enrolled/logged in
                         enrollRepo.isEnrolled() -> "employee_dashboard"
                         
-                        // 3. If Device Owner but not enrolled, go to enrollment
-                        AdminReceiver.isDeviceOwner(context) -> "employee_enrollment"
-                        
-                        // 4. Default to login
+                        // 3. Default to login (admin/employee choice)
                         else -> "login"
                     }
                     navController.navigate(dest) {

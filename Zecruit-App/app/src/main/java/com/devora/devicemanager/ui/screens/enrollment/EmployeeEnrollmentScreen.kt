@@ -91,6 +91,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.devora.devicemanager.enrollment.EnrollmentViewModel
+import com.devora.devicemanager.session.SessionManager
 import com.devora.devicemanager.ui.theme.DMSans
 import com.devora.devicemanager.ui.theme.JetBrainsMono
 import com.devora.devicemanager.ui.theme.PlusJakartaSans
@@ -129,6 +130,7 @@ fun EmployeeEnrollmentScreen(
     var showHowTo by remember { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
+    val context = LocalContext.current
 
     fun formatToken(input: String): String {
         val raw = input.uppercase().filter { it.isLetterOrDigit() }
@@ -143,10 +145,16 @@ fun EmployeeEnrollmentScreen(
     // Sync the ViewModel's step index to the local enrollStep for unchanged UI rendering
     enrollStep = enrollmentState.stepIndex
 
-    // FIX 1: Directly navigate to Employee Dashboard on success (step 5)
-    // NO success screen at all
+    LaunchedEffect(Unit) {
+        // If user explicitly signed out, enforce clean enrollment state on screen entry.
+        if (SessionManager.isForceReEnroll(context)) {
+            enrollmentVm.resetEnrollment()
+        }
+    }
+
+    // Navigate to dashboard only after genuine successful enrollment, not stale state.
     LaunchedEffect(enrollStep) {
-        if (enrollStep == 5) {
+        if (enrollStep == 5 && !SessionManager.isForceReEnroll(context)) {
             onEnrollSuccess()
         }
     }
@@ -368,7 +376,6 @@ fun EmployeeEnrollmentScreen(
                     Spacer(Modifier.height(16.dp))
 
                     // ── REAL CAMERA VIEWFINDER ──
-                    val context = LocalContext.current
                     val lifecycleOwner = LocalLifecycleOwner.current
                     var hasCameraPermission by remember {
                         mutableStateOf(

@@ -16,6 +16,7 @@ import androidx.core.app.NotificationCompat
 import com.devora.devicemanager.AdminReceiver
 import com.devora.devicemanager.BlockedAppActivity
 import com.devora.devicemanager.network.RetrofitClient
+import com.devora.devicemanager.session.SessionManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -84,12 +85,17 @@ class HeartbeatService : Service() {
             while (true) {
                 val deviceId = prefs.getString("device_id", null)
                 if (deviceId != null) {
+                    val isSignedOut = SessionManager.isEmployeeSignedOut(this@HeartbeatService)
                     try {
-                        val response = RetrofitClient.api.sendHeartbeat(deviceId)
-                        if (response.isSuccessful) {
-                            Log.d(TAG, "Heartbeat sent for $deviceId")
+                        if (isSignedOut) {
+                            Log.d(TAG, "Employee signed out; skipping heartbeat for $deviceId")
                         } else {
-                            Log.w(TAG, "Heartbeat failed for $deviceId with HTTP ${response.code()}")
+                            val response = RetrofitClient.api.sendHeartbeat(deviceId)
+                            if (response.isSuccessful) {
+                                Log.d(TAG, "Heartbeat sent for $deviceId")
+                            } else {
+                                Log.w(TAG, "Heartbeat failed for $deviceId with HTTP ${response.code()}")
+                            }
                         }
                     } catch (e: Exception) {
                         Log.w(TAG, "Heartbeat failed: ${e.message}")

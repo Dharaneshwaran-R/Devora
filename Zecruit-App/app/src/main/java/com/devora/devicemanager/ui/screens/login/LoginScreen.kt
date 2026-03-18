@@ -404,7 +404,8 @@ fun LoginScreen(
                                                 SessionManager.saveSession(context, adminName, normalizedEmail)
                                                 onLoginSuccess()
                                             } else {
-                                                val msg = response.body()?.message ?: "Invalid credentials"
+                                                val msg = response.body()?.message
+                                                    ?: "Invalid credentials. Use Admin email and password."
                                                 snackbarHostState.showSnackbar(msg)
                                             }
                                         } catch (e: Exception) {

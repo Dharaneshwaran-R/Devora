@@ -29,14 +29,15 @@ public class AdminController {
 
     @PostMapping("/register")
     public ResponseEntity<?> register(@Valid @RequestBody AdminRegisterRequest request) {
-        if (adminRepository.existsByEmail(request.getEmail())) {
+        String normalizedEmail = request.getEmail().trim().toLowerCase();
+        if (adminRepository.existsByEmailIgnoreCase(normalizedEmail)) {
             return ResponseEntity.status(HttpStatus.CONFLICT)
                     .body(Map.of("success", false, "message", "Email already registered"));
         }
 
         Admin admin = Admin.builder()
-                .name(request.getName())
-                .email(request.getEmail())
+            .name(request.getName().trim())
+            .email(normalizedEmail)
                 .password(passwordEncoder.encode(request.getPassword()))
                 .createdAt(LocalDateTime.now())
                 .build();
@@ -50,10 +51,23 @@ public class AdminController {
     @PostMapping("/login")
     public ResponseEntity<AdminLoginResponse> login(@Valid @RequestBody AdminLoginRequest request) {
         String normalizedEmail = request.getEmail().trim().toLowerCase();
+        String rawPassword = request.getPassword();
         log.info("Login attempt for email: {}", normalizedEmail);
         return adminRepository.findByEmailIgnoreCase(normalizedEmail)
                 .map(admin -> {
-                    if (passwordEncoder.matches(request.getPassword(), admin.getPassword())) {
+                    String storedPassword = admin.getPassword() == null ? "" : admin.getPassword();
+                    boolean passwordMatches = passwordEncoder.matches(rawPassword, storedPassword);
+
+                    // Backward compatibility: support legacy rows that accidentally stored
+                    // plain passwords before encoder enforcement, then migrate to hash.
+                    if (!passwordMatches && storedPassword.equals(rawPassword)) {
+                        admin.setPassword(passwordEncoder.encode(rawPassword));
+                        adminRepository.save(admin);
+                        passwordMatches = true;
+                        log.info("Migrated legacy plaintext password to encoded hash for {}", normalizedEmail);
+                    }
+
+                    if (passwordMatches) {
                         log.info("Login successful for: {}", normalizedEmail);
                         return ResponseEntity.ok(
                                 new AdminLoginResponse(true, admin.getName(), "Login successful"));

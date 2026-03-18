@@ -462,10 +462,16 @@ public class DeviceController {
 
         @PostMapping("/devices/{deviceId}/sign-out")
         public ResponseEntity<?> signOutDevice(@PathVariable String deviceId) {
-                // 1. Find the device and set status to OFFLINE
+                // 1. Find the device and set status to OFFLINE.
+                // Also backdate lastSeenAt so heartbeat reconciler doesn't immediately restore ACTIVE.
                 Device device = deviceRepo.findByDeviceId(deviceId)
-                                .orElseThrow(() -> new RuntimeException("Device not found"));
+                                .orElse(null);
+                if (device == null) {
+                        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                                        .body(Map.of("message", "Device not found"));
+                }
                 device.setStatus("OFFLINE");
+                device.setLastSeenAt(LocalDateTime.now().minusHours(1));
                 deviceRepo.save(device);
 
                 // 2. Log the activity for the Admin Dashboard

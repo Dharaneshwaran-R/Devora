@@ -11,6 +11,7 @@ import com.devora.devicemanager.network.EnrollmentApiService
 import com.devora.devicemanager.network.RetrofitClient
 import com.devora.devicemanager.network.model.AppInfoDto
 import com.devora.devicemanager.network.model.BulkAppInventoryRequest
+import com.devora.devicemanager.session.SessionManager
 import com.devora.devicemanager.sync.PolicySyncWorker
 
 /**
@@ -87,6 +88,14 @@ class EnrollmentRepository(
         val deviceId = deviceInfo.deviceId
 
         try {
+            // Recovery path: if backend already has this device as enrolled/active,
+            // restore local enrollment state and continue without re-enrollment.
+            recoverEnrollmentFromServerIfNeeded(deviceId)?.let { recovered ->
+                onStepChanged(EnrollmentStatus.FINALIZING)
+                onStepChanged(EnrollmentStatus.SUCCESS)
+                return recovered
+            }
+
             // Step 1 — Validate token
             onStepChanged(EnrollmentStatus.VALIDATING_TOKEN)
             if (!validateTokenFormat(token)) {
@@ -123,6 +132,15 @@ class EnrollmentRepository(
 
             val enrollData = enrollResponse.body()
 
+            // Persist immediately after successful enroll API so app restarts don't lose state.
+            persistEnrollmentState(
+                deviceId = deviceId,
+                token = token,
+                method = method,
+                employeeId = enrollData?.employeeId,
+                employeeName = enrollData?.employeeName
+            )
+
             // Step 3 — Upload device info
             onStepChanged(EnrollmentStatus.INSTALLING_POLICIES)
             try {
@@ -140,6 +158,8 @@ class EnrollmentRepository(
                         employeeId = enrollData?.employeeId
                     )
                 )
+            } catch (oom: OutOfMemoryError) {
+                Log.e(TAG, "Device info upload OOM (non-fatal)", oom)
             } catch (e: Exception) {
                 Log.w(TAG, "Device info upload failed (non-fatal): ${e.message}")
             }
@@ -147,7 +167,8 @@ class EnrollmentRepository(
             // Step 4 — Upload app inventory (bulk)
             onStepChanged(EnrollmentStatus.CONFIGURING_DEVICE_OWNER)
             try {
-                val apps = AppInventoryCollector.collect(context)
+                // During enrollment, skip icon payloads to avoid memory spikes.
+                val apps = AppInventoryCollector.collect(context, includeIcons = false)
                 val appDtos = apps.map { app ->
                     AppInfoDto(
                         appName = app.appName,
@@ -165,19 +186,14 @@ class EnrollmentRepository(
                     apps = appDtos
                 )
                 com.devora.devicemanager.network.ApiConfig.syncApi.uploadAppInventory(bulkRequest)
+            } catch (oom: OutOfMemoryError) {
+                Log.e(TAG, "App inventory upload OOM (non-fatal)", oom)
             } catch (e: Exception) {
                 Log.w(TAG, "App inventory upload failed (non-fatal): ${e.message}")
             }
 
             // Step 5 — Finalize
             onStepChanged(EnrollmentStatus.FINALIZING)
-            persistEnrollmentState(
-                deviceId = deviceId,
-                token = token,
-                method = method,
-                employeeId = enrollData?.employeeId,
-                employeeName = enrollData?.employeeName
-            )
 
             onStepChanged(EnrollmentStatus.SUCCESS)
             return EnrollmentResult(
@@ -199,6 +215,45 @@ class EnrollmentRepository(
                 method = method,
                 errorMessage = e.message ?: "Unknown enrollment error"
             )
+        }
+    }
+
+    suspend fun recoverEnrollmentFromServerIfNeeded(deviceId: String? = null): EnrollmentResult? {
+        if (SessionManager.isForceReEnroll(context)) return null
+        if (isEnrolled()) return null
+
+        val resolvedDeviceId = deviceId ?: DeviceInfoCollector.collect(context).deviceId
+        return try {
+            val response = api.checkDevice(resolvedDeviceId)
+            if (!response.isSuccessful) return null
+
+            val device = response.body() ?: return null
+            val status = (device.status ?: "").uppercase()
+            val isAlreadyEnrolled = status == "ACTIVE" || status == "ENROLLED" || status == "ONLINE" || status == "OFFLINE"
+            if (!isAlreadyEnrolled) return null
+
+            val recoveredMethod = device.enrollmentMethod ?: "RECOVERED"
+            val recoveredToken = getStoredToken() ?: "RECOVERED"
+
+            persistEnrollmentState(
+                deviceId = resolvedDeviceId,
+                token = recoveredToken,
+                method = recoveredMethod,
+                employeeId = device.employeeId,
+                employeeName = device.employeeName
+            )
+
+            EnrollmentResult(
+                deviceId = resolvedDeviceId,
+                enrolledAt = device.enrolledAt,
+                status = device.status,
+                method = recoveredMethod,
+                employeeName = device.employeeName,
+                employeeId = device.employeeId
+            )
+        } catch (e: Exception) {
+            Log.d(TAG, "Recovery check skipped: ${e.message}")
+            null
         }
     }
 
@@ -260,7 +315,7 @@ class EnrollmentRepository(
         employeeId: String? = null,
         employeeName: String? = null
     ) {
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val committed = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .edit()
             .putBoolean("is_enrolled", true)
             .putString("device_id", deviceId)
@@ -269,7 +324,14 @@ class EnrollmentRepository(
             .putString("employee_id", employeeId)
             .putString("employee_name", employeeName)
             .putLong("enrolled_at", System.currentTimeMillis())
-            .apply()
+            .commit()
+
+        if (!committed) {
+            Log.w(TAG, "Enrollment state commit returned false for deviceId=$deviceId")
+        }
+
+        SessionManager.setForceReEnroll(context, false)
+        SessionManager.setEmployeeSignedOut(context, false)
 
         // Ensure remote commands (e.g., LOCK) are polled immediately after enrollment.
         PolicySyncWorker.scheduleNow(context)

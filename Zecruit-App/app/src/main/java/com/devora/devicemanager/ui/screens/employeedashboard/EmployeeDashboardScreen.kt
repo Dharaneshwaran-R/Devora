@@ -96,6 +96,7 @@ import com.devora.devicemanager.collector.DeviceInfoCollector
 import com.devora.devicemanager.network.AppInventoryItem
 import com.devora.devicemanager.session.SessionManager
 import com.devora.devicemanager.sync.DeviceInfoSyncWorker
+import com.devora.devicemanager.sync.HeartbeatService
 import com.devora.devicemanager.sync.LocationSyncWorker
 import com.devora.devicemanager.sync.PolicySyncWorker
 import com.devora.devicemanager.sync.SyncManager
@@ -314,6 +315,10 @@ fun EmployeeDashboardScreen(
     }
 
     LaunchedEffect(Unit) {
+        // Employee is actively using dashboard; resume heartbeat and clear signed-out flag.
+        SessionManager.setEmployeeSignedOut(context, false)
+        HeartbeatService.start(context)
+
         loadActivities()
         loadAppInventory()
         while (true) {
@@ -1061,13 +1066,29 @@ fun EmployeeDashboardScreen(
                                 )
                                 .clickable {
                                     showSignOutDialog = false
-                                    // Notify backend and then sign out locally
+                                    // Notify backend, mark signed out, then sign out locally.
                                     scope.launch {
                                         try {
-                                            RemoteDataSource.signOutDevice(activeDeviceId)
+                                            val response = RemoteDataSource.signOutDevice(activeDeviceId)
+                                            if (!response.isSuccessful) {
+                                                Toast.makeText(
+                                                    context,
+                                                    "Server sign-out failed (${response.code()}); device may stay online briefly",
+                                                    Toast.LENGTH_SHORT
+                                                ).show()
+                                            }
                                         } catch (e: Exception) {
-                                            // Optional: Handle error or log it
+                                            Toast.makeText(
+                                                context,
+                                                "Network error during sign-out; offline status may be delayed",
+                                                Toast.LENGTH_SHORT
+                                            ).show()
                                         }
+
+                                        SessionManager.setForceReEnroll(context, true)
+                                        SessionManager.setEmployeeSignedOut(context, true)
+                                        SessionManager.clearDeviceEnrollment(context)
+                                        HeartbeatService.stop(context)
                                         onSignOut()
                                     }
                                 },

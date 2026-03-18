@@ -4,6 +4,7 @@ import android.app.Application
 import android.graphics.Bitmap
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.devora.devicemanager.session.SessionManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -44,12 +45,28 @@ class EnrollmentViewModel(application: Application) : AndroidViewModel(applicati
     val uiState: StateFlow<EnrollmentUiState> = _uiState.asStateFlow()
 
     init {
+        val forceReEnroll = SessionManager.isForceReEnroll(getApplication())
+
         // Check if already enrolled
-        if (repository.isEnrolled()) {
+        if (repository.isEnrolled() && !forceReEnroll) {
             _uiState.value = _uiState.value.copy(
                 status = EnrollmentStatus.SUCCESS,
                 stepIndex = 5
             )
+        } else {
+            viewModelScope.launch {
+                val recovered = repository.recoverEnrollmentFromServerIfNeeded()
+                if (recovered != null) {
+                    _uiState.value = _uiState.value.copy(
+                        status = EnrollmentStatus.SUCCESS,
+                        stepIndex = 5,
+                        enrollmentResult = recovered,
+                        employeeName = recovered.employeeName,
+                        employeeId = recovered.employeeId,
+                        isDeviceOwner = policyHelper.isDeviceOwner
+                    )
+                }
+            }
         }
     }
 

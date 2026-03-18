@@ -27,7 +27,7 @@ object AppInventoryCollector {
 
     private const val TAG = "AppInventoryCollector"
 
-    fun collect(context: Context): List<AppInfo> {
+    fun collect(context: Context, includeIcons: Boolean = true): List<AppInfo> {
         val pm = context.packageManager
         val restrictedSet = context
             .getSharedPreferences("devora_restrictions", Context.MODE_PRIVATE)
@@ -41,10 +41,14 @@ object AppInventoryCollector {
             pm.getInstalledPackages(0)
         }
 
-        return packages.map { info -> info.toAppInfo(pm, restrictedSet) }
+        return packages.map { info -> info.toAppInfo(pm, restrictedSet, includeIcons) }
     }
 
-    private fun PackageInfo.toAppInfo(pm: PackageManager, restrictedSet: Set<String>): AppInfo {
+    private fun PackageInfo.toAppInfo(
+        pm: PackageManager,
+        restrictedSet: Set<String>,
+        includeIcons: Boolean
+    ): AppInfo {
         val appLabel = applicationInfo?.loadLabel(pm)?.toString().orEmpty()
 
         val versionCode: Long = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
@@ -59,7 +63,7 @@ object AppInventoryCollector {
         } ?: false
 
         val installer = getInstallerPackage(pm, packageName.orEmpty())
-        val icon = getAppIconBase64(pm, packageName.orEmpty())
+        val icon = if (includeIcons) getAppIconBase64(pm, packageName.orEmpty()) else ""
         val suspended = restrictedSet.contains(packageName.orEmpty())
 
         return AppInfo(

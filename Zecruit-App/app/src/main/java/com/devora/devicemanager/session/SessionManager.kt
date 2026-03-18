@@ -9,7 +9,9 @@ object SessionManager {
     private const val KEY_IS_LOGGED_IN = "is_logged_in"
     private const val KEY_ADMIN_NAME = "admin_name"
     private const val KEY_ADMIN_EMAIL = "admin_email"
+    private const val KEY_FORCE_REENROLL = "force_reenroll"
     private const val ENROLLMENT_PREF = "devora_enrollment"
+    private const val KEY_EMPLOYEE_SIGNED_OUT = "employee_signed_out"
 
     private fun prefs(context: Context): SharedPreferences =
         context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
@@ -40,5 +42,27 @@ object SessionManager {
             .edit()
             .clear()
             .apply()
+    }
+
+    fun setEmployeeSignedOut(context: Context, signedOut: Boolean) {
+        context.getSharedPreferences(ENROLLMENT_PREF, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(KEY_EMPLOYEE_SIGNED_OUT, signedOut)
+            .apply()
+    }
+
+    fun isEmployeeSignedOut(context: Context): Boolean {
+        return context.getSharedPreferences(ENROLLMENT_PREF, Context.MODE_PRIVATE)
+            .getBoolean(KEY_EMPLOYEE_SIGNED_OUT, false)
+    }
+
+    fun setForceReEnroll(context: Context, force: Boolean) {
+        prefs(context).edit()
+            .putBoolean(KEY_FORCE_REENROLL, force)
+            .apply()
+    }
+
+    fun isForceReEnroll(context: Context): Boolean {
+        return prefs(context).getBoolean(KEY_FORCE_REENROLL, false)
     }
 }
