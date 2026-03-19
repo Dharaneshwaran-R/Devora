@@ -235,6 +235,14 @@ public class EnrollmentService {
             sdkVersion = latest.getSdkVersion();
             serialNumber = latest.getSerialNumber();
             deviceOwnerSet = latest.getDeviceOwnerSet();
+
+            if (!Boolean.TRUE.equals(deviceOwnerSet)) {
+                boolean hasAnyDeviceOwnerSet = infoList.stream()
+                        .anyMatch(info -> Boolean.TRUE.equals(info.getDeviceOwnerSet()));
+                if (hasAnyDeviceOwnerSet) {
+                    deviceOwnerSet = true;
+                }
+            }
         }
 
         if ((employeeName == null || employeeName.isBlank()) || (employeeId == null || employeeId.isBlank())) {

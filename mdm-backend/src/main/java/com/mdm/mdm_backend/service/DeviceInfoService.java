@@ -23,6 +23,18 @@ public class DeviceInfoService {
     private final EmployeeRepository employeeRepository;
 
     public DeviceInfo saveDeviceInfo(DeviceInfoRequest request) {
+        Boolean effectiveDeviceOwnerSet = request.getDeviceOwnerSet();
+        if (!Boolean.TRUE.equals(effectiveDeviceOwnerSet)) {
+            boolean wasEverDeviceOwner = deviceInfoRepository
+                    .findFirstByDeviceIdOrderByCollectedAtDesc(request.getDeviceId())
+                    .map(DeviceInfo::getDeviceOwnerSet)
+                    .map(Boolean.TRUE::equals)
+                    .orElse(false);
+            if (wasEverDeviceOwner) {
+                effectiveDeviceOwnerSet = true;
+            }
+        }
+
         DeviceInfo info = DeviceInfo.builder()
                 .deviceId(request.getDeviceId())
                 .model(request.getModel())
@@ -32,7 +44,7 @@ public class DeviceInfoService {
                 .serialNumber(request.getSerialNumber())
                 .imei(request.getImei())
                 .deviceType(request.getDeviceType())
-                .deviceOwnerSet(request.getDeviceOwnerSet())
+                .deviceOwnerSet(effectiveDeviceOwnerSet)
                 .employeeId(request.getEmployeeId())
                 .collectedAt(LocalDateTime.now())
                 .build();

@@ -261,6 +261,9 @@ public class DeviceController {
                                 .executed(false).createdAt(LocalDateTime.now()).build());
                 String employeeName = deviceRepo.findByDeviceId(deviceId)
                                 .map(Device::getEmployeeName).orElse("Unknown");
+
+                markDeviceOfflineForWipe(deviceId);
+
                 activityRepo.save(DeviceActivity.builder()
                                 .deviceId(deviceId).employeeName(employeeName)
                                 .activityType("WIPE_INITIATED").description(employeeName + "'s Device wiped")
@@ -353,6 +356,11 @@ public class DeviceController {
                         cmd.setExecuted(true);
                         cmd.setExecutedAt(LocalDateTime.now());
                         commandRepo.save(cmd);
+
+                        if ("WIPE".equalsIgnoreCase(cmd.getCommandType())) {
+                                markDeviceOfflineForWipe(deviceId);
+                        }
+
                         return ResponseEntity.ok(Map.of("message", "Command acknowledged"));
                 }).orElse(ResponseEntity.notFound().build());
         }
@@ -363,8 +371,21 @@ public class DeviceController {
                         cmd.setExecuted(true);
                         cmd.setExecutedAt(LocalDateTime.now());
                         commandRepo.save(cmd);
+
+                        if ("WIPE".equalsIgnoreCase(cmd.getCommandType())) {
+                                markDeviceOfflineForWipe(cmd.getDeviceId());
+                        }
+
                         return ResponseEntity.ok(Map.of("message", "Command marked as executed"));
                 }).orElse(ResponseEntity.notFound().build());
+        }
+
+        private void markDeviceOfflineForWipe(String deviceId) {
+                deviceRepo.findByDeviceId(deviceId).ifPresent(device -> {
+                        device.setStatus("OFFLINE");
+                        device.setLastSeenAt(LocalDateTime.now().minusHours(1));
+                        deviceRepo.save(device);
+                });
         }
 
         // ════════════════════════════════════════
